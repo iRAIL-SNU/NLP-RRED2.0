@@ -93,12 +93,12 @@ class JsonlDataset(Dataset):
 class JsonlDatasetSNUH(Dataset):
     def __init__(self, data_path, tokenizer, transforms, vocab, args, data_path_1=None, report_img_pair_info=None):
         self.args = args
-        self.data_normal = [json.loads(l) for l in open(data_path)][:10000]
-        print("데이터 10000개만 사용!!!!!!!!! "*5)
+        self.data_normal = [json.loads(l) for l in open(data_path)]#[:10000]
+        # print("데이터 10000개만 사용!!!!!!!!! "*5)
         if args.make_error:
             print('ADDING ERROR # '*20)
            #### TEMP error file, 나중에는 data 불러온 다음에 tool 이용해서 에러 추가하도록 해야함.
-            self.data_error = [json.loads(l) for l in open(data_path_1)][:10000]
+            self.data_error = [json.loads(l) for l in open(data_path_1)]#[:10000]
             for idx in range(len(self.data_normal)):
                 self.data_normal[idx]['label'] = 0
             for idx in range(len(self.data_error)):
@@ -198,7 +198,7 @@ class JsonlDatasetSNUH(Dataset):
             #     self.args.labels.index(str(self.data[index]['label']))
             # ] = 1
         elif self.args.task_type == "binary":
-            label = self.args.labels.index(str(self.data[index]['label'])) ######### TODO: 레이블 잘 달리고 있는지 확인
+            label = self.args.labels.index(str(self.data[index]['label']))
         else:
             input("이거는 multilabel 학습 아니니 다시 돌리세요~")
             pass

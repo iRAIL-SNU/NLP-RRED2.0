@@ -86,7 +86,8 @@ def get_vocab(args):
         vocab.stoi = bert_tokenizer.get_vocab()  # <unk>, <pad>
         vocab.vocab_sz = len(vocab.stoi)  # 250002
     elif args.model == 'cxr-bert':
-        bert_tokenizer = AutoTokenizer.from_pretrained(args.bert_model, trust_remote_code=True)
+        # bert_tokenizer = AutoTokenizer.from_pretrained(args.bert_model, trust_remote_code=True)
+        bert_tokenizer = CXRBertTokenizer.from_pretrained(args.bert_model, revision='v1.1')
         vocab.stoi = bert_tokenizer.vocab
         vocab.itos = bert_tokenizer.convert_ids_to_tokens
         vocab.vocab_sz = bert_tokenizer.vocab_size
