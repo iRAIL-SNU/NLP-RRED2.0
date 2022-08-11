@@ -49,7 +49,7 @@ def get_args(parser):
     parser.add_argument("--use_ddp", type=bool, default=False)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--n_workers", type=int, default=32)
-    parser.add_argument("--patience", type=int, default=2)
+    parser.add_argument("--patience", type=int, default=100)
 
     now = datetime.now()
     now = now.strftime('%Y-%m-%d')
@@ -78,11 +78,11 @@ def get_args(parser):
                         help="train dset for mimic")
     parser.add_argument("--Valid_dset0_name", type=str, default='frontal_val.jsonl',
                         help="valid dset for mimic")
-    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_train_error.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_train_error.jsonl',
                         help="train dset for mimic")
-    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_val_error.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_val_error.jsonl',
                         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -142,7 +142,7 @@ def get_args(parser):
 
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lr_factor", type=float, default=0.5)
-    parser.add_argument("--lr_patience", type=int, default=3)
+    parser.add_argument("--lr_patience", type=int, default=100)
 
     parser.add_argument("--max_seq_len", type=int, default=512)
     parser.add_argument("--num_image_embeds", type=int, default=0)
@@ -270,7 +270,6 @@ def model_eval(i_epoch, data, model, args, criterion, device, store_preds=False)
 
 
 def model_forward(model, args, criterion, batch, device, i_epoch):
-    # txt, segment, mask, img, tgt = batch
     findings, impression, img, tgt = batch
 
     # freeze_img = True if args.freeze_img_all else i_epoch < args.freeze_img

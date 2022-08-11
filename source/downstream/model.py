@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from health_multimodal.text.model import CXRBertModel
-from health_multimodal.image.model import ImageModel, get_biovil_resnet
+from health_multimodal.image.model import get_biovil_resnet
 
 MODEL_TYPE = "resnet50"
 
@@ -31,10 +31,10 @@ class VLModelClf(nn.Module):
         image_embed = self.image_model(image)
         image_embed = image_embed.projected_global_embedding
 
-        # txt, segment, mask = findings
-        # findings_embed = self.text_model.get_projected_text_embeddings(txt, mask)
+        txt, _, mask = findings
+        findings_embed = self.text_model.get_projected_text_embeddings(txt, mask)
+        return self.clf(torch.cat((image_embed, findings_embed), 1))
 
-        txt, segment, mask = impression
-        impression_embed = self.text_model.get_projected_text_embeddings(txt, mask)
-
-        return self.clf(torch.cat((image_embed, impression_embed), 1))
+        # txt, _, mask = impression
+        # impression_embed = self.text_model.get_projected_text_embeddings(txt, mask)
+        # return self.clf(torch.cat((image_embed, impression_embed), 1))
