@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 
 import sys
 sys.path.insert(1, '/home/workspace/source/utils')
-from utils import truncate_seq_pair, numpy_seed
+from utils import truncate_seq_pair, numpy_seed, make_image_path
 
 import random
 
@@ -112,6 +112,8 @@ class JsonlDatasetSNUH(Dataset):
                 print("WITH DYNAMIC SAMPLING # "*5)
             # print('error is just concatted' * 10)
         else:
+            for idx in range(len(self.data_normal)):
+                self.data_normal[idx]['label'] = 0
             self.data = self.data_normal
                     
         if args.test_with_bootstrap and 'train' not in data_path:
@@ -143,6 +145,7 @@ class JsonlDatasetSNUH(Dataset):
             return len(self.data_normal)+int(len(self.data_normal)*self.args.error_sampling)
         else:
             return len(self.data_normal)
+
 
     def __getitem__(self, index):
         if self.args.error_sampling!=0:
@@ -203,18 +206,14 @@ class JsonlDatasetSNUH(Dataset):
             input("이거는 multilabel 학습 아니니 다시 돌리세요~")
             pass
 
+        image_path = make_image_path(self.data[index], base_dir=self.args.data_dir_img, dataset='mimic-cxr')
+
         image = None
-
-        if self.args.dataset == 'mimic-cxr':
-            subject_id = self.data[index]['subject_id']
-            study_id = self.data[index]['study_id']
-            image_file_name = f"p{str(subject_id)[:2]}/p{subject_id}/s{study_id}/{self.data[index]['dicom_id']}.jpg"
-            image_path = os.path.join(self.args.data_dir_img, image_file_name)
-
         if os.path.isfile(image_path):
             image = Image.open(image_path)
         else:
-            image = Image.fromarray(128 * np.ones((256, 256, 3), dtype=np.uint8))
+            imarray = np.random.rand(2544,3056) * 255
+            image = Image.fromarray(imarray.astype('uint8'))
             
         image = self.transforms(image)
 

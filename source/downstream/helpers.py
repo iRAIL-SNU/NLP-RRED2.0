@@ -248,13 +248,16 @@ def get_data_loaders(args):
         
     elif args.inference_method == 'batch': #for inference
 
-        infer = JsonlInferDatasetSNUH(
+        infer = JsonlDatasetSNUH(
+            os.path.join(args.data_path, args.Valid_dset0_name),################TEMP
             tokenizer,
             transforms,
             vocab,
             args,
-            input=os.path.join(args.data_path, args.Valid_dset0_name)
         )
+
+        args.valid_data_len = len(infer)
+
         collate = functools.partial(collate_fn, args=args)
 
         infer_loader = DataLoader(
@@ -264,5 +267,6 @@ def get_data_loaders(args):
             num_workers=args.n_workers,
             collate_fn=collate,
         )
+
         return infer_loader
 
