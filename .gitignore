@@ -1,8 +1,8 @@
 
 CoCa-pytorch/
 hi-ml/
-source/downstream/training_output*
-
+source/downstream/training_output*/
+inference_result/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

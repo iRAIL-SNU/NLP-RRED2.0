@@ -22,6 +22,7 @@ from model import VLModelClf
 import sys
 sys.path.insert(1, '/home/workspace/source/utils')
 from utils import *
+
 from logger import create_logger
 import wandb
 
@@ -78,10 +79,14 @@ def get_args(parser):
                         help="train dset for mimic")
     parser.add_argument("--Valid_dset0_name", type=str, default='frontal_val.jsonl',
                         help="valid dset for mimic")
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_train_error.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_train_error.jsonl',
                         help="train dset for mimic")
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_val_error.jsonl',
                         help="valid dset for mimic")
 
@@ -136,7 +141,7 @@ def get_args(parser):
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
 
-    parser.add_argument("--img_embed_pool_type", type=str, default="max", choices=["max", "avg"])
+    parser.add_argument("--img_embed_pool_type", type=str, default="biovil", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_hidden_sz", type=int, default=2048)
     parser.add_argument("--include_bn", type=int, default=True)
 
@@ -151,7 +156,7 @@ def get_args(parser):
     parser.add_argument("--weight_classes", type=int, default=1)
 
     parser.add_argument("--inference", type=bool, default=False)
-    parser.add_argument("--inference_method", type=str, default=None, choices=['batch','single'])
+    parser.add_argument("--inference_method", type=str, default=None, choices=['batch','single', None])
     parser.add_argument("--test_dset_name", type=str, default='test_error_0509-k1000.jsonl',
                             help="valid dset for SNUH")
 

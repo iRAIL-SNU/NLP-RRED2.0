@@ -64,3 +64,11 @@ def numpy_seed(seed, *addl_seeds):
         yield
     finally:
         np.random.set_state(state)
+
+def make_image_path(data_line, base_dir, dataset='mimic-cxr'):
+    if dataset == 'mimic-cxr':
+        subject_id = data_line['subject_id']
+        study_id = data_line['study_id']
+        image_file_name = f"p{str(subject_id)[:2]}/p{subject_id}/s{study_id}/{data_line['dicom_id']}.jpg"
+        image_path = os.path.join(base_dir, image_file_name)
+    return image_path
