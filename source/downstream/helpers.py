@@ -19,6 +19,9 @@ from torch.utils.data import DistributedSampler
 from health_multimodal.image.data.transforms import create_chest_xray_transform_for_inference
 from health_multimodal.text.model import CXRBertTokenizer
 
+from torchvision.transforms import Compose, RandomAffine, ColorJitter, RandomHorizontalFlip
+
+
 def get_transforms(args):
     if args.inference_method == None:
         if args.dataset=='mimic-cxr':
@@ -37,6 +40,22 @@ def get_transforms(args):
                     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
                 ]
         )
+
+
+def get_image_augmentations(aug_method):
+    color_jitter = ColorJitter(brightness=.2, contrast=.2, saturation=.2, hue=.2 )
+    horizontal_flip = RandomHorizontalFlip(p=0.5)
+    random_affine = RandomAffine(degrees=30,translate=(0.1,0.1),scale=(0.8, 1.2))
+
+    augmentations = []
+    if aug_method in ["all","colur"]:
+        augmentations.append(color_jitter)
+    if aug_method in ["all","hflip"]:
+        augmentations.append(horizontal_flip)
+    if aug_method in ["all","affine"]:
+        augmentations.append(random_affine)
+   
+    return Compose(augmentations)
 
 
 def get_labels_and_frequencies(path):
@@ -161,6 +180,7 @@ def get_data_loaders(args):
         resize=args.TRANSFORM_RESIZE,
         center_crop_size=args.TRANSFORM_CENTER_CROP_SIZE
     )
+    augmentations_img = get_image_augmentations(args.img_aug)
 
 # ###############################TEMP
     args.labels = ["0", "1"]
@@ -173,23 +193,26 @@ def get_data_loaders(args):
 
     if args.inference_method == None:
         train = JsonlDatasetSNUH(
-            os.path.join(args.data_path, args.Train_dset0_name),################TEMP
+            os.path.join(args.data_path, args.Train_dset0_name),
             tokenizer,
             transforms,
             vocab,
             args,
-            os.path.join(args.data_path, args.Train_dset1_name),################TEMP
+            os.path.join(args.data_path, args.Train_dset1_name),
+            is_test=False,
+            augmentations=augmentations_img,
         )
 
         args.train_data_len = len(train)
 
         val = JsonlDatasetSNUH(
-            os.path.join(args.data_path, args.Valid_dset0_name),################TEMP
+            os.path.join(args.data_path, args.Valid_dset0_name),
             tokenizer,
             transforms,
             vocab,
             args,
-            os.path.join(args.data_path, args.Valid_dset1_name),################TEMP
+            os.path.join(args.data_path, args.Valid_dset1_name),
+            is_test=True
         )
 
         args.valid_data_len = len(val)
@@ -243,6 +266,7 @@ def get_data_loaders(args):
             vocab,
             args,
             input=args.single_input,
+            is_test=True
         )
         return infer
         
@@ -254,6 +278,7 @@ def get_data_loaders(args):
             transforms,
             vocab,
             args,
+            is_test=True
         )
 
         args.valid_data_len = len(infer)

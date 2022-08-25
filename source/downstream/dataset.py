@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 
 import sys
 sys.path.insert(1, '/home/workspace/source/utils')
-from utils import truncate_seq_pair, numpy_seed, make_image_path
+from utils import shuffle_sentence, numpy_seed, make_image_path
 
 import random
 
@@ -91,8 +91,9 @@ class JsonlDataset(Dataset):
 
 
 class JsonlDatasetSNUH(Dataset):
-    def __init__(self, data_path, tokenizer, transforms, vocab, args, data_path_1=None, report_img_pair_info=None):
+    def __init__(self, data_path, tokenizer, transforms, vocab, args, data_path_1=None, is_test=False, augmentations=None):
         self.args = args
+        self.is_test = is_test
         self.data_normal = [json.loads(l) for l in open(data_path)]#[:10000]
         # print("데이터 10000개만 사용!!!!!!!!! "*5)
         if args.make_error:
@@ -106,7 +107,7 @@ class JsonlDatasetSNUH(Dataset):
 
             # self.data = self.temp_error_sampler()
             # print('error sampling skipped' * 10)
-            if args.error_sampling==0:
+            if args.error_sampling==0 or is_test:
                 self.data = self.data_normal + self.data_error
             else:
                 print("WITH DYNAMIC SAMPLING # "*5)
@@ -116,7 +117,7 @@ class JsonlDatasetSNUH(Dataset):
                 self.data_normal[idx]['label'] = 0
             self.data = self.data_normal
                     
-        if args.test_with_bootstrap and 'train' not in data_path:
+        if args.test_with_bootstrap and is_test:
             self.data = [random.choice(self.data) for i in range(len(self.data))]
 
         self.data_dir = os.path.dirname(data_path)
@@ -132,58 +133,48 @@ class JsonlDatasetSNUH(Dataset):
         self.text_start_token = [self.cls_tok]
 
         self.max_seq_len = args.max_seq_len
-        
-        # with numpy_seed(0):
-        #     for row in self.data:
-        #         if np.random.random() < args.drop_img_percent:
-        #             row["img"] = None
 
         self.transforms = transforms
+        self.augmentations = augmentations
 
     def __len__(self):
-        if self.args.make_error:
+        if self.args.error_sampling!=0:
             return len(self.data_normal)+int(len(self.data_normal)*self.args.error_sampling)
         else:
-            return len(self.data_normal)
+            return len(self.data)
 
 
     def __getitem__(self, index):
-        if self.args.error_sampling!=0:
+        if self.args.error_sampling!=0 and not self.is_test:
             # sample errors in each epoch
             sampled_error = random.sample(self.data_error, k=len(self.data_normal)*self.args.error_sampling)
             self.data = self.data_normal + sampled_error
 
-        # print('self.max_seq_len:', self.max_seq_len)
-        # print('args.num_image_embeds:', self.args.num_image_embeds)
+        if not self.is_test and self.args.txt_aug =='sentence_shuffling':
+            self.data[index]["Findings"] = shuffle_sentence(self.data[index]["Findings"])
+            self.data[index]["Impression"] = shuffle_sentence(self.data[index]["Impression"])
+            
         sentence_findings = (
             self.text_start_token + self.tokenizer(str(self.data[index]["Findings"]))[: (self.max_seq_len-1)]
             )
         segment_findings = torch.zeros(len(sentence_findings))
-        # print('sentence:', sentence)
-        # print('len_seq:', len(sentence))
-        # print('**************************************')
-
         sentence_findings = torch.LongTensor(
             [
                 self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi[self.unk_tok]
                 for w in sentence_findings
             ]
-        )
+            )
 
         sentence_impression = (
             self.text_start_token + self.tokenizer(str(self.data[index]["Impression"]))[: (self.max_seq_len - 1)]
             )
         segment_impression = torch.zeros(len(sentence_impression))
-        # print('sentence:', sentence)
-        # print('len_seq:', len(sentence))
-        # print('**************************************')
-
         sentence_impression = torch.LongTensor(
             [
                 self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi[self.unk_tok]
                 for w in sentence_impression
             ]
-        )
+            )
 
         if self.args.task_type == "multilabel":
             label = torch.zeros(self.n_classes)
@@ -196,15 +187,10 @@ class JsonlDatasetSNUH(Dataset):
             ] = 1
         elif self.args.task_type == "classification":
             label = self.args.labels.index(str(self.data[index]['label']))
-            # label = torch.zeros(self.n_classes)
-            # label[
-            #     self.args.labels.index(str(self.data[index]['label']))
-            # ] = 1
         elif self.args.task_type == "binary":
             label = self.args.labels.index(str(self.data[index]['label']))
         else:
-            input("이거는 multilabel 학습 아니니 다시 돌리세요~")
-            pass
+            print( 'check task_type')
 
         image_path = make_image_path(self.data[index], base_dir=self.args.data_dir_img, dataset='mimic-cxr')
 
@@ -215,6 +201,8 @@ class JsonlDatasetSNUH(Dataset):
             imarray = np.random.rand(2544,3056) * 255
             image = Image.fromarray(imarray.astype('uint8'))
             
+        if not self.is_test:
+            image = self.augmentations(image)
         image = self.transforms(image)
 
         return sentence_findings, segment_findings, sentence_impression, segment_impression, image, label

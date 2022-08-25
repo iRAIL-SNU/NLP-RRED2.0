@@ -5,6 +5,8 @@ import contextlib
 import numpy as np
 
 import torch
+from nltk import tokenize
+from random import shuffle
 
 def set_seed(seed):
     random.seed(seed)
@@ -72,3 +74,10 @@ def make_image_path(data_line, base_dir, dataset='mimic-cxr'):
         image_file_name = f"p{str(subject_id)[:2]}/p{subject_id}/s{study_id}/{data_line['dicom_id']}.jpg"
         image_path = os.path.join(base_dir, image_file_name)
     return image_path
+
+
+def shuffle_sentence(document):
+    sentences = tokenize.sent_tokenize(document)
+    shuffle(sentences)
+
+    return " ".join(sentences)
