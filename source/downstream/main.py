@@ -41,6 +41,7 @@ def get_args(parser):
 
     parser.add_argument("--seed", type=int, default=1125)
     parser.add_argument("--batch_sz", type=int, default=32)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--max_epochs", type=int, default=5)
 
     parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert'])
@@ -76,17 +77,22 @@ def get_args(parser):
 
 
     parser.add_argument("--Train_dset0_name", type=str, default='frontal_train.jsonl',
+    # parser.add_argument("--Train_dset0_name", type=str, default='frontal_first_train.jsonl',
                         help="train dset for mimic")
     parser.add_argument("--Valid_dset0_name", type=str, default='frontal_val.jsonl',
+    # parser.add_argument("--Valid_dset0_name", type=str, default='frontal_first_val.jsonl',
                         help="valid dset for mimic")
+
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_train_error.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_train_error.jsonl',
-    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_train_error.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle_First/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_train_error.jsonl',
                         help="train dset for mimic")
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
-    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle_First/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_val_error.jsonl',
                         help="valid dset for mimic")
 
@@ -113,7 +119,6 @@ def get_args(parser):
 
     parser.add_argument("--JOINT_FEATURE_SIZE", type=int, default=128)
     
-    
     parser.add_argument("--embed_sz", type=int, default=768, choices=[768])
     parser.add_argument("--hidden_sz", type=int, default=768, choices=[768])
 
@@ -132,19 +137,21 @@ def get_args(parser):
     parser.add_argument("--drop_img_percent", type=float, default=0.0)
     parser.add_argument("--dropout", type=float, default=0.1)
 
-    parser.add_argument("--freeze_img", type=int, default=0)
-    parser.add_argument("--freeze_txt", type=int, default=0)
-
-    parser.add_argument("--freeze_img_all", type=str, default=False)
-    parser.add_argument("--freeze_txt_all", type=str, default=False)
-
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--hidden", nargs="*", type=int, default=[])
-
+    parser.add_argument("--multimodal_model_type", type=str, default=None, choices=[None, "transformer"])
     parser.add_argument("--img_embed_pool_type", type=str, default="biovil", choices=["biovil", "att_img", "att_txt"])
+    parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "all", "None"])
+    parser.add_argument("--txt_aug", type=str, default="sentence_shuffling", choices=["sentence_shuffling","None"])
+    
+
     parser.add_argument("--img_hidden_sz", type=int, default=2048)
     parser.add_argument("--include_bn", type=int, default=True)
 
+    parser.add_argument("--freeze_img", type=int, default=0)
+    parser.add_argument("--freeze_txt", type=int, default=0)
+    parser.add_argument("--freeze_img_all", type=str, default=False)
+    parser.add_argument("--freeze_txt_all", type=str, default=False)
+
+    parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lr_factor", type=float, default=0.5)
     parser.add_argument("--lr_patience", type=int, default=100)
@@ -409,16 +416,21 @@ def train(args):
 
     for i_epoch in range(start_epoch, args.max_epochs):
         train_losses = []
+        print_step = 100
+        loss_sum = 0
 
         model.train()
         optimizer.zero_grad()
-        # lr = optimizer.get_lr
+
         for step, batch in enumerate(tqdm(train_loader, total=len(train_loader))):
             loss, out, target = model_forward(model, args, criterion, batch, device,i_epoch)
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
-            if step % 10 == 0:
-                print(f'train_loss: {loss.item()}')
+
+            loss_sum += loss.item()
+            if step % print_step == 0 and step!=0:
+                print(f'avg_train_loss for {print_step} steps: {loss_sum/print_step}')
+                loss_sum = 0
 
             train_losses.append(loss.item())
             loss.backward()
