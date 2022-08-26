@@ -68,7 +68,7 @@ def model_eval(args, data):
 
 
 
-def cal_performance(tgts, total_outs, threshold=0.5):
+def cal_performance(tgts, total_outs, threshold=0.5, resultdir=None):
     preds = []
     preds_prob = []
     for total_out in total_outs:
@@ -98,17 +98,17 @@ def cal_performance(tgts, total_outs, threshold=0.5):
     precisions, recalls, thresholds = precision_recall_curve(tgts, preds_prob)
     pr_display = PrecisionRecallDisplay(precisions, recalls).plot()
     pr_display.plot()
-    plt.savefig('PRCurve_mimic_human.png', dpi=300)
+    # plt.savefig(os.path.join(resultdir,'PRCurve_mimic_human.png'), dpi=300)
 
     plt.cla()
 
     fpr, tpr, thresholds_roc = roc_curve(tgts, preds_prob)
     # roc_display = RocCurveDisplay(fpr, tpr)
-    # plt.savefig('ROC_mimic_human.png', dpi=300)
+    # plt.savefig(os.path.join(resultdir,'ROC_mimic_human.png'), dpi=300)
 
     import pickle
-    with open('mimic-human_prc_plot.pkl', 'wb') as f:
-        pickle.dump(pr_display, f)
+    # with open('mimic-human_prc_plot.pkl', 'wb') as f:
+    #     pickle.dump(pr_display, f)
 
     metrics["ppv(precision)"] = matrix[1,1]/(matrix[0,1]+matrix[1,1])
     metrics["npv"] = matrix[0,0]/(matrix[0,0]+matrix[1,0])
@@ -139,29 +139,28 @@ def get_args(parser):
 
     parser.add_argument("--loaddir", type=str, default=
     # 'workspace/source/downstream/training_output2022-08-22/no_name/model_best.pt'
-    'workspace/source/downstream/training_output2022-08-23/factualOnly_freeze/checkpoint.pt'
+    # 'workspace/source/downstream/training_output2022-08-23/factualOnly_freeze/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-08-25/RandomShuffle_dropna_poolAttTxt_freeze/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-08-25/FactualOnly_dropna_poolAttTxt_freeze/model_best.pt'
+    'workspace/source/downstream/training_output2022-08-25/RandomShuffle_dropna_poolAttTxt_freeze_augImgTxt/model_best.pt'
     )
     parser.add_argument("--resultdir", type=str, default='workspace/inference_result')
-
-    parser.add_argument("--openi", type=bool, default=False)
 
 
 ##########################
 ##########################
 ########################## 
 
-
     parser.add_argument("--Valid_dset0_name", type=str, default='frontal_test.jsonl',
                         help="valid dset for mimic")
 
-
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
                     help="mimic-cxr or indiana")
+    parser.add_argument("--openi", type=bool, default=False)
     parser.add_argument("--data_path", type=str, default='data/mimic-cxr-jpg/2.0.0/rred',
                         help="dset path for training")
     parser.add_argument("--data_dir_img", type=str, default='data/mimic-cxr-jpg/2.0.0/files',
                         help="dset path for training")
-
 
     parser.add_argument("--test_with_bootstrap", type=bool, default=False,
                         help="test with bootstrap")
@@ -185,12 +184,11 @@ def get_args(parser):
     parser.add_argument("--init_model", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized",
                         choices=["bert-base-uncased", "xlm-roberta-base", 'microsoft/BiomedVLP-CXR-BERT-specialized'])
 
-
     parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
     parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=480)
-    parser.add_argument("--use_text_query", action='store_true')
-    parser.add_argument('--no-use_text_query', dest='use_text_query', action='store_false')
-    parser.set_defaults(use_text_query=True)
+
+    parser.add_argument("--multimodal_model_type", type=str, default="att_pool", choices=["att_pool", "transformer"])
+    parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
 
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--max_seq_len", type=int, default=512)
@@ -204,6 +202,8 @@ if __name__=='__main__':
     get_args(parser)
     args, remaining_args = parser.parse_known_args()
 
+    model_setting_name = args.loaddir.split('/')[-2]
+
     print("Model Test")
     print(" # PID :", os.getpid())
 
@@ -215,9 +215,9 @@ if __name__=='__main__':
     args.n_classes = 2
     
     model = VLModelClf(args)
-    # if torch.cuda.device_count() > 1 and args.device != torch.device('cpu'):
-    #     print("Let's use", torch.cuda.device_count(), "GPUs!")
-    #     model = nn.DataParallel(model)
+    if torch.cuda.device_count() > 1 and args.device != torch.device('cpu'):
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        model = nn.DataParallel(model)
     model.load_state_dict(torch.load(args.loaddir)['state_dict'], strict=True)
     model.to(args.device)
     model.eval()
@@ -232,7 +232,7 @@ if __name__=='__main__':
 
         val_loader = get_data_loaders(args)
         tgt, _, total_outs  = model_eval(args, val_loader)
-        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.5)
+        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.8, resultdir=args.resultdir)
 
         metrics_li.append(metrics)
 
@@ -290,7 +290,7 @@ if __name__=='__main__':
     import pytz
     now = datetime.now(tz=pytz.timezone('Asia/Tokyo'))
     now = now.strftime("%y%m%d-%H%M%S")
-    output_path = os.path.join(args.resultdir, str(now))
+    output_path = os.path.join(args.resultdir, str(now)+'_'+model_setting_name)
     output_img_path = os.path.join(output_path,'images')
     if not os.path.exists(output_path):
         os.mkdir(output_path)

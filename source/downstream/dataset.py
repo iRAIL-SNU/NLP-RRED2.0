@@ -95,11 +95,13 @@ class JsonlDatasetSNUH(Dataset):
         self.args = args
         self.is_test = is_test
         self.data_normal = [json.loads(l) for l in open(data_path)]#[:10000]
-        # print("데이터 10000개만 사용!!!!!!!!! "*5)
+        #print("데이터 10000개만 사용!!!!!!!!! "*5)
         if args.make_error:
             print('ADDING ERROR # '*20)
            #### TEMP error file, 나중에는 data 불러온 다음에 tool 이용해서 에러 추가하도록 해야함.
             self.data_error = [json.loads(l) for l in open(data_path_1)]#[:10000]
+            #print("데이터 10000개만 사용!!!!!!!!! "*5)
+
             for idx in range(len(self.data_normal)):
                 self.data_normal[idx]['label'] = 0
             for idx in range(len(self.data_error)):
@@ -150,6 +152,7 @@ class JsonlDatasetSNUH(Dataset):
             sampled_error = random.sample(self.data_error, k=len(self.data_normal)*self.args.error_sampling)
             self.data = self.data_normal + sampled_error
 
+        # sentence shuffling within each section
         if not self.is_test and self.args.txt_aug =='sentence_shuffling':
             self.data[index]["Findings"] = shuffle_sentence(self.data[index]["Findings"])
             self.data[index]["Impression"] = shuffle_sentence(self.data[index]["Impression"])
