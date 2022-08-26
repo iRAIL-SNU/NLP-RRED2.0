@@ -180,7 +180,7 @@ def get_data_loaders(args):
         resize=args.TRANSFORM_RESIZE,
         center_crop_size=args.TRANSFORM_CENTER_CROP_SIZE
     )
-    augmentations_img = get_image_augmentations(args.img_aug)
+    augmentations_img = None if args.inference else get_image_augmentations(args.img_aug) 
 
 # ###############################TEMP
     args.labels = ["0", "1"]
@@ -273,7 +273,7 @@ def get_data_loaders(args):
     elif args.inference_method == 'batch': #for inference
 
         infer = JsonlDatasetSNUH(
-            os.path.join(args.data_path, args.Valid_dset0_name),################TEMP
+            os.path.join(args.data_path, args.Valid_dset0_name),
             tokenizer,
             transforms,
             vocab,

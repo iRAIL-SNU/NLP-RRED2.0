@@ -18,7 +18,7 @@ import torch.optim as optim
 # from pytorch_pretrained_bert import BertAdam
 
 from helpers import get_data_loaders
-from model import VLModelClf
+from model import VLModelClf, VLBertClf
 import sys
 sys.path.insert(1, '/home/workspace/source/utils')
 from utils import *
@@ -84,14 +84,14 @@ def get_args(parser):
                         help="valid dset for mimic")
 
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_train_error.jsonl',
-    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_train_error.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle_First/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_train_error.jsonl',
                         help="train dset for mimic")
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
-    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle_First/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_val_error.jsonl',
                         help="valid dset for mimic")
@@ -137,8 +137,10 @@ def get_args(parser):
     parser.add_argument("--drop_img_percent", type=float, default=0.0)
     parser.add_argument("--dropout", type=float, default=0.1)
 
-    parser.add_argument("--multimodal_model_type", type=str, default=None, choices=[None, "transformer"])
-    parser.add_argument("--img_embed_pool_type", type=str, default="biovil", choices=["biovil", "att_img", "att_txt"])
+    parser.add_argument("--multimodal_model_type", type=str, default="vlbert", choices=["att_pool", "vlbert"])
+    parser.add_argument("--multimodal_depth", type=int, default=1, choices=[1,2,4,8])
+
+    parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "all", "None"])
     parser.add_argument("--txt_aug", type=str, default="sentence_shuffling", choices=["sentence_shuffling","None"])
     
@@ -148,8 +150,8 @@ def get_args(parser):
 
     parser.add_argument("--freeze_img", type=int, default=0)
     parser.add_argument("--freeze_txt", type=int, default=0)
-    parser.add_argument("--freeze_img_all", type=str, default=False)
-    parser.add_argument("--freeze_txt_all", type=str, default=False)
+    parser.add_argument("--freeze_img_all", type=str, default=True)
+    parser.add_argument("--freeze_txt_all", type=str, default=True)
 
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -167,13 +169,21 @@ def get_args(parser):
     parser.add_argument("--test_dset_name", type=str, default='test_error_0509-k1000.jsonl',
                             help="valid dset for SNUH")
 
-def get_criterion(args, device):
+
+def get_model(args):
+    if args.multimodal_model_type == "vlbert":
+        return VLBertClf(args)
+    elif args.multimodal_model_type == "att_pool":
+        return VLModelClf(args)
+     
+
+def get_criterion(args):
     if args.task_type == "multilabel":
         if args.weight_classes:
             freqs = [args.label_freqs[l] for l in args.labels]
             negative = [args.train_data_len - l for l in freqs]
             label_weights = (torch.FloatTensor(freqs) / torch.FloatTensor(negative)) ** -1
-            criterion = nn.BCEWithLogitsLoss(pos_weight=label_weights.to(device))
+            criterion = nn.BCEWithLogitsLoss(pos_weight=label_weights.to(args.device))
         else:
             criterion = nn.BCEWithLogitsLoss()
     else:
@@ -214,13 +224,13 @@ def get_scheduler(optimizer, args):
         optimizer, "max", patience=args.lr_patience, verbose=True, factor=args.lr_factor
     )
 
-def model_eval(i_epoch, data, model, args, criterion, device, store_preds=False):
+def model_eval(i_epoch, data, model, args, criterion, store_preds=False):
     with torch.no_grad():
         losses, preds, preds_bool, tgts = [], [], [], []
         outAUROC = []
 
         for batch in data:
-            loss, out, tgt = model_forward(model, args, criterion, batch, device, i_epoch)
+            loss, out, tgt = model_forward(model, args, criterion, batch, i_epoch)
             losses.append(loss.item())
 
             if args.task_type == "multilabel":
@@ -280,70 +290,36 @@ def model_eval(i_epoch, data, model, args, criterion, device, store_preds=False)
 
     return metrics, classACC, tgts, preds
 
+def freeze_weight(model, args, i_epoch):
+    m = model
+    if torch.cuda.device_count() > 1 and args.use_ddp==False and args.device != 'cpu':
+        m = model.module
 
-def model_forward(model, args, criterion, batch, device, i_epoch):
-    findings, impression, img, tgt = batch
-
-    # freeze_img = True if args.freeze_img_all else i_epoch < args.freeze_img
-    # print(f'epoch{i_epoch}, freeze_img: {freeze_img}')
-    # freeze_txt = True if args.freeze_txt_all else i_epoch < args.freeze_txt
-    # print(f'epoch{i_epoch}, freeze_img: {freeze_txt}')
-
-
-    # printflag_img = True
-    # printflag_txt = True
-
-    # if args.num_image_embeds > 0:
-        
-    #     for param in model.enc.img_encoder.parameters():
-    #         param.requires_grad = not freeze_img
-
-    #         if printflag_img: 
-    #             print(f"enc.img_encoder freezed?: {freeze_img}, epoch: {i_epoch}")
-    #             printflag_img=False
-    
-    # for param in model.enc.encoder.parameters():
-    #     param.requires_grad = not freeze_txt
-    #     if printflag_txt: 
-    #         print(f"enc.encoder freezed?: {freeze_txt}, epoch: {i_epoch}")
-    #         printflag_txt=False
-
-            ####################################### tmp
-    # if i_epoch < args.freeze_img:
-    #     for param in model.enc.img_encoder.parameters():
-    #         param.requires_grad = False
-    # else: 
-    #     for param in model.enc.img_encoder.parameters():
-    #         param.requires_grad = True
-    if torch.cuda.device_count() > 1 and args.use_ddp==False and device != torch.device('cpu'):
-        if i_epoch < args.freeze_img or args.freeze_img_all:
-            for param in model.module.image_model.parameters():
-                param.requires_grad = False
-        else: 
-            for param in model.module.image_model.parameters():
-                param.requires_grad = True
-
-        if i_epoch < args.freeze_txt or args.freeze_txt_all:
-            for param in model.module.text_model.parameters():
-                param.requires_grad = False
-        else: 
-            for param in model.module.text_model.parameters():
-                param.requires_grad = True
-        
+    if args.multimodal_model_type == "vlbert":
+        m = m.enc
     else:
-        if i_epoch < args.freeze_img or args.freeze_img_all:
-            for param in model.image_model.parameters():
-                param.requires_grad = False
-        else: 
-            for param in model.image_model.parameters():
-                param.requires_grad = True
+        m = model
 
-        if i_epoch < args.freeze_txt or args.freeze_txt_all:
-            for param in model.text_model.parameters():
-                param.requires_grad = False
-        else: 
-            for param in model.text_model.parameters():
-                param.requires_grad = True
+    if i_epoch < args.freeze_img or args.freeze_img_all:
+        for param in m.image_model.parameters():
+            param.requires_grad = False
+    else: 
+        for param in m.image_model.parameters():
+            param.requires_grad = True
+
+    if i_epoch < args.freeze_txt or args.freeze_txt_all:
+        for param in m.text_model.parameters():
+            param.requires_grad = False
+    else: 
+        for param in m.text_model.parameters():
+            param.requires_grad = True
+
+
+def model_forward(model, args, criterion, batch, i_epoch):
+    findings, impression, img, tgt = batch
+    device = args.device
+
+    freeze_weight(model, args, i_epoch)
 
     findings = (findings[0].to(device), findings[1].to(device), findings[2].to(device))
     impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
@@ -368,13 +344,9 @@ def train(args):
     train_loader, val_loader = get_data_loaders(args)
     # batch = next(iter(train_loader))
 
-    device = torch.device("cuda" if torch.cuda.is_available() and args.device!='cpu' else "cpu")
-    # device = torch.device("cpu")
-    args.device = device
 
-    model = VLModelClf(args) 
-
-    criterion = get_criterion(args, device)
+    model = get_model(args)
+    criterion = get_criterion(args)
     optimizer = get_optimizer(model, args)
     scheduler = get_scheduler(optimizer, args)
 
@@ -405,10 +377,10 @@ def train(args):
 
     # print("freeze image?", args.freeze_img_all)
     # print("freeze txt?", args.freeze_txt_all)
-    model.to(device)
+    model.to(args.device)
     logger.info("Training..")
 
-    if torch.cuda.device_count() > 1 and args.use_ddp==False and device != torch.device('cpu'):
+    if torch.cuda.device_count() > 1 and args.use_ddp==False and args.device != 'cpu':
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
 
@@ -423,7 +395,7 @@ def train(args):
         optimizer.zero_grad()
 
         for step, batch in enumerate(tqdm(train_loader, total=len(train_loader))):
-            loss, out, target = model_forward(model, args, criterion, batch, device,i_epoch)
+            loss, out, target = model_forward(model, args, criterion, batch, i_epoch)
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
 
@@ -441,7 +413,7 @@ def train(args):
 
         model.eval()
         print("epoch ",i_epoch+1," is done. now evaluating..")
-        metrics, classACC, tgts, preds = model_eval(i_epoch, val_loader, model, args, criterion, device)
+        metrics, classACC, tgts, preds = model_eval(i_epoch, val_loader, model, args, criterion)
         logger.info("Train Loss: {:.4f}".format(np.mean(train_losses)))
         log_metrics("Val", metrics,  args, logger)
 
@@ -551,7 +523,7 @@ def test(args):
     os.makedirs(args.savedir, exist_ok=True)
 
     train_loader, val_loader = get_data_loaders(args)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = args.device
     model = get_model(args)
 
     criterion = get_criterion(args, device)
