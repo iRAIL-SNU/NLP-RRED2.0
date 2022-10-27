@@ -1,19 +1,26 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
 
 from health_multimodal.text.model import CXRBertModel
 from health_multimodal.image.model import get_biovil_resnet
 
 import sys
 sys.path.insert(1, '/home/workspace/source/model/report_coca')
-from report_coca import CrossAttention, LayerNorm, Residual, ParallelTransformerBlock
+from report_coca import CrossAttention, LayerNorm
+from flamingo_pytorch import PerceiverResampler, GatedCrossAttentionBlock
+from flamingo_pytorch.flamingo_palm import *
 from einops import rearrange, repeat
 
 from transformers import BertConfig, BertModel
 
 MODEL_TYPE = "resnet50"
+
+def gelu(x):
+    """Implementation of the gelu activation function.
+        For information: OpenAI GPT's gelu is slightly different (and gives slightly different results):
+        0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
+    """
+    return x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 
 class VLModelClf(nn.Module):
@@ -32,7 +39,7 @@ class VLModelClf(nn.Module):
         else:
             # use attention pooling
             self.dim = 768
-            self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=2048, dim_head=64, heads=8, norm_context=True)
+            self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=args.img_hidden_sz, dim_head=64, heads=8, norm_context=True)
             self.img_attn_pool_norm = LayerNorm(self.dim)
     
             self.attn_last_pool = nn.Linear(self.dim, args.JOINT_FEATURE_SIZE)
@@ -54,7 +61,7 @@ class VLModelClf(nn.Module):
         else:
             findings_embed = self.text_model(txt,mask).last_hidden_state[:,0,:]
             image_embed = image_embed.patch_embedding
-            image_embed = image_embed.resize(image_embed.shape[0],15*15,2048)
+            image_embed = image_embed.resize(image_embed.shape[0],15*15,self.args.img_hidden_sz)
 
             if self.args.img_embed_pool_type=='att_txt':
                 # use [cls] feature for query
@@ -84,7 +91,7 @@ class ImageBertEmbeddings(nn.Module):
 
         # use attention pooling for Multimodal transformer
         self.dim = 768
-        self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=2048, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=args.img_hidden_sz, dim_head=64, heads=8, norm_context=True)
         self.img_attn_pool_norm = LayerNorm(self.dim)
         self.img_queries = nn.Parameter(torch.randn(128,self.dim))
 
@@ -136,23 +143,6 @@ class VLBertEncoder(nn.Module):
     def forward(self, findings, impression, image):
         txt, _, mask = findings
 
-        bsz = txt.size(0)
-        # attention_mask = torch.cat(
-        #     [
-        #         torch.ones(bsz, self.args.num_image_embeds + 2).long().cuda(),
-        #         attention_mask,
-        #     ],
-        #     dim=1)
-        # extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-
-        # try:
-        #     extended_attention_mask = extended_attention_mask.to(
-        #         dtype=next(self.parameters()).dtype)  # fp16 compatibility
-        # except StopIteration:
-        #     extended_attention_mask = extended_attention_mask.to(dtype=torch.float16)
-
-        # extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-
         img_tok = (
             torch.LongTensor(txt.size(0), 128 + 1)
             .fill_(0)
@@ -163,11 +153,12 @@ class VLBertEncoder(nn.Module):
             .to(self.args.device))
 
         img = self.image_model(image).patch_embedding  
-        img = img.resize(img.shape[0],15*15,2048)# img: Bx15x15x2048
+        img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
 
-        img_embed_out = self.img_embeddings(img, img_tok) # img_embed_out: Bx128x768
+        img_embed_out = self.img_embeddings(img, img_tok) # img_embed_out: Bx(128+1)x768
        
         findings_embed = self.text_model(txt,mask).last_hidden_state
+        ## TODO: findings_embed length가 너무 길어서 len(encoder_input)>512인 경우 에러 발생할수도. truncate해야할듯
 
         findings_embed = findings_embed + self.txt_embeddings.token_type_embeddings(txt_tok)
         findings_embed = self.txt_embeddings.LayerNorm(findings_embed)
@@ -189,3 +180,398 @@ class VLBertClf(nn.Module):
         x = self.enc(findings, impression, image)
         return self.clf(x)
 
+
+class CXRFlamingo(nn.Module):
+    def __init__(self, args):
+        super(CXRFlamingo,self).__init__()
+        self.args = args
+
+        language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
+        self.image_model = get_biovil_resnet()
+        freeze_model_and_make_eval_(language_model)
+        freeze_model_and_make_eval_(self.image_model)
+
+        self.dim = args.hidden_sz # 768
+        self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=args.img_hidden_sz, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm = LayerNorm(self.dim)
+        self.img_queries = nn.Parameter(torch.randn(15*15,self.dim))
+
+        self.perceiver_resampler = PerceiverResampler(
+            dim=self.dim,
+            depth=args.perceiver_depth,
+            dim_head=args.perceiver_dim_head,
+            heads=args.perceiver_num_head,
+            num_latents=args.num_img_token,       # the number of latents to shrink your media sequence to, perceiver style
+            num_media_embeds = args.max_num_img, ## max number of images per example
+        )
+
+        self.img_attn_pool_last = CrossAttention(dim=self.dim, context_dim=self.dim, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm_last = LayerNorm(self.dim)
+
+        self.text_embdding = language_model.bert.embeddings
+        lm_layers = language_model.bert.encoder.layer
+        
+        self.encoder_layers = nn.ModuleList([])
+
+        if self.args.cross_attn_order == 'single->cross':
+            for i in range(len(lm_layers)):
+                self.encoder_layers.append(nn.ModuleList([
+                    lm_layers[i],
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None
+                ])
+            )
+        elif self.args.cross_attn_order == 'cross->single':
+            for i in range(len(lm_layers)):
+                self.encoder_layers.append(nn.ModuleList([
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None,
+                    lm_layers[i]
+                ])
+            )
+
+        self.to_logits = nn.Sequential(
+            # LayerNorm(self.dim),
+            # nn.Linear(self.dim, args.n_classes, bias=False)
+            LayerNorm(self.dim*2),
+            nn.Linear(self.dim*2, args.n_classes, bias=False)
+        )
+
+    def forward(self, findings, impression, image):
+        txt, _, attention_mask = findings
+
+        img = self.image_model(image).patch_embedding  
+        img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
+
+        ####
+        queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
+        img = self.img_attn_pool(queries, img)
+        img = self.img_attn_pool_norm(img)
+        ####
+
+        img = self.perceiver_resampler(img)
+
+        ####
+        # queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
+        # img = img.squeeze(1)
+        # img = self.img_attn_pool(queries, img)
+        # img = self.img_attn_pool_norm(img)
+        # img = img.unsqueeze(1)
+        ####
+
+        findings_embed = self.text_embdding(txt)
+        # impression_embed = self.text_embdding(txt)
+
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        if self.args.cross_attn_order == 'cross->single':
+            for xattn_layer, lm_layer in self.encoder_layers:
+                if exists(xattn_layer) and exists(img):
+                    findings_embed = xattn_layer(findings_embed, img)
+                findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
+        elif self.args.cross_attn_order == 'single->cross':
+            for lm_layer, xattn_layer in self.encoder_layers:
+                findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
+                if exists(xattn_layer) and exists(img):
+                    findings_embed = xattn_layer(findings_embed, img)
+
+        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.squeeze(1))
+        img = self.img_attn_pool_norm_last(img)
+
+        return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1))
+
+
+    # def forward(self, findings, impression, image):
+    #     txt, _, attention_mask = findings
+
+    #     img = self.image_model(image).patch_embedding  
+    #     img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
+
+    #     queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
+    #     img = self.img_attn_pool(queries, img)
+    #     img = self.img_attn_pool_norm(img)
+
+    #     img = self.perceiver_resampler(img)
+
+    #     findings_embed = self.text_embdding(txt)
+    #     # impression_embed = self.text_embdding(txt)
+
+    #     extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+    #     extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+    #     for xattn_layer, lm_layer in self.encoder_layers:
+    #         if exists(xattn_layer) and exists(img):
+    #             findings_embed = xattn_layer(findings_embed, img)
+
+    #         findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
+
+    #     # return self.to_logits(findings_embed[:,0,:])
+    #     return self.to_logits(findings_embed[:,[0,2],:].reshape(findings_embed.shape[0],-1))
+
+class CXRFlamingoForErrorDetection(nn.Module):
+    def __init__(self,args):
+        super(CXRFlamingoForErrorDetection,self).__init__()
+        self.args = args
+        self.encoder = CXRFlamingoEncoder(args)
+
+        self.to_logits = nn.Sequential(
+            LayerNorm(self.dim*2),
+            nn.Linear(self.dim*2, args.n_classes, bias=False)
+        )
+
+    def forward(self, findings, impression, image):
+        img, findings_embed, impression_embed = self.encoder(findings, impression, image)
+        return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1))
+
+
+class CXRFlamingoForPreTraining(nn.Module):
+    def __init__(self,args):
+        super(CXRFlamingoForPreTraining,self).__init__()
+        self.args = args
+        self.encoder = CXRFlamingoEncoder(args)
+        self.mlm = CXRFlamingoMLMHead(args, self.encoder.text_embdding.word_embeddings.weight)
+        self.itm = nn.Sequential(LayerNorm(args.hidden_sz*2), 
+                                nn.Linear(args.hidden_sz*2, 2))
+
+
+    def forward(self, findings, impression, image):
+        img, findings_embed, _ = self.encoder(findings, impression, image)
+
+        prediction_scores_masked, _ = self.mlm(findings_embed[-1])
+        predict_itm = self.itm(img, findings_embed)
+        return prediction_scores_masked, predict_itm
+
+
+class CXRFlamingoPredictionHeadTransform(nn.Module):
+    def __init__(self, args):
+        super(CXRFlamingoPredictionHeadTransform, self).__init__()
+        self.transform_act_fn = gelu
+        hid_size = args.hidden_sz
+        self.dense = nn.Linear(args.hidden_sz, hid_size)
+        self.LayerNorm = nn.LayerNorm(hid_size, eps=1e-5)
+
+    def forward(self, hidden_states):
+        hidden_states = self.dense(hidden_states)
+        hidden_states = self.transform_act_fn(hidden_states)
+        hidden_states = self.LayerNorm(hidden_states)
+        return hidden_states
+
+class CXRFlamingoLMPredictionHead(nn.Module):
+    def __init__(self, args, bert_model_embedding_weights):
+        super(CXRFlamingoLMPredictionHead, self).__init__()
+        self.transform = CXRFlamingoPredictionHeadTransform(args)
+
+        # The output weights are the same as the input embeddings, but there is
+        # an output-only bias for each token.
+        self.decoder = nn.Linear(bert_model_embedding_weights.size(1),
+                                 bert_model_embedding_weights.size(0),
+                                 bias=False)
+        self.decoder.weight = bert_model_embedding_weights
+        self.bias = nn.Parameter(torch.zeros(
+            bert_model_embedding_weights.size(0)))
+
+    def forward(self, hidden_states):
+        hidden_states = self.transform(hidden_states)
+        hidden_states = self.decoder(hidden_states) + self.bias
+        return hidden_states
+
+class CXRFlamingoMLMHead(nn.Module):
+    def __init__(self, args, bert_model_embedding_weights):
+        super(CXRFlamingoMLMHead, self).__init__()
+        self.predictions = CXRFlamingoLMPredictionHead(
+            args, bert_model_embedding_weights)
+    def forward(self, sequence_output):
+        prediction_scores = self.predictions(sequence_output)
+        seq_relationship_score = None
+        return prediction_scores, seq_relationship_score
+
+
+
+class CXRFlamingoEncoder(nn.Module):
+    def __init__(self, args):
+        super(CXRFlamingoEncoder,self).__init__()
+        self.args = args
+
+        language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
+        self.image_model = get_biovil_resnet()
+        freeze_model_and_make_eval_(language_model)
+        freeze_model_and_make_eval_(self.image_model)
+
+        self.dim = args.hidden_sz # 768
+        self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=args.img_hidden_sz, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm = LayerNorm(self.dim)
+        self.img_queries = nn.Parameter(torch.randn(15*15,self.dim))
+
+        self.img_attn_pool_last = CrossAttention(dim=self.dim, context_dim=self.dim, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm_last = LayerNorm(self.dim)
+
+        self.perceiver_resampler = PerceiverResampler(
+            dim=self.dim,
+            depth=args.perceiver_depth,
+            dim_head=64,
+            heads=8,
+            num_latents=64,       # the number of latents to shrink your media sequence to, perceiver style
+            num_media_embeds = 2, ## max number of images per example
+        )
+
+        self.text_embdding = language_model.bert.embeddings
+        lm_layers = language_model.bert.encoder.layer
+        
+        self.encoder_layers = nn.ModuleList([])
+        for i in range(len(lm_layers)):
+            self.encoder_layers.append(nn.ModuleList([
+                GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None,
+                lm_layers[i]
+            ])
+        )
+
+
+    def forward(self, findings, impression, image):
+        txt, _, attention_mask = findings
+
+        img = self.image_model(image).patch_embedding  
+        img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
+
+        queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
+        img = self.img_attn_pool(queries, img)
+        img = self.img_attn_pool_norm(img)
+
+        img = self.perceiver_resampler(img)
+
+        findings_embed = self.text_embdding(txt)
+        impression_embed = None
+
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        for xattn_layer_front, lm_layer in self.encoder_layers:
+            if exists(xattn_layer_front) and exists(img):
+                findings_embed = xattn_layer_front(findings_embed, img)
+
+            findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
+
+        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.squeeze(1))
+        img = self.img_attn_pool_norm_last(img)
+
+        return img, findings_embed, impression_embed
+
+
+class CXRCoCa(nn.Module):
+    def __init__(self, args):
+        super(CXRCoCa,self).__init__()
+        self.args = args
+        self.pad_id = 0
+        self.caption_loss_weight = 1.
+        self.contrastive_loss_weight = 1.
+
+        language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
+        self.image_model = get_biovil_resnet()
+
+        self.dim = args.hidden_sz # 768
+        
+        self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=args.img_hidden_sz, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm = LayerNorm(self.dim)
+        self.text_cls_norm = LayerNorm(self.dim)
+        self.img_queries = nn.Parameter(torch.randn(15*15,self.dim))
+
+        self.perceiver_resampler = PerceiverResampler(
+            dim=self.dim,
+            depth=args.perceiver_depth,
+            dim_head=args.perceiver_dim_head,
+            heads=args.perceiver_num_head,
+            num_latents=args.num_img_token+1,       # the number of latents to shrink your media sequence to, perceiver style 
+                                                    # +1 for contrastive loss
+            num_media_embeds = args.max_num_img, ## max number of images per example
+        )
+
+        self.text_embedding = language_model.bert.embeddings
+        self.text_model = language_model.bert.encoder
+        # freeze_model_and_make_eval_(self.text_embedding)
+        # freeze_model_and_make_eval_(self.text_model)
+        # freeze_model_and_make_eval_(self.image_model)
+        
+        # contrastive learning temperature
+        self.temperature = nn.Parameter(torch.Tensor([1.]))
+
+        # multimodal layers
+        self.multimodal_layers = nn.ModuleList([])
+        for ind in range(self.args.multimodal_depth):
+            self.multimodal_layers.append(nn.ModuleList([
+                Residual(ParallelTransformerBlock(dim=self.dim, dim_head=64, heads=8, ff_mult=4)),
+                XResidual(CrossAttention(dim=self.dim, dim_head=64, heads=8, parallel_ff=True, ff_mult=4)) ## TODO: Apply GatedCrossAttentionBlock 
+            ]))
+
+        self.to_logits = nn.Sequential(
+            LayerNorm(self.dim),
+            nn.Linear(self.dim, args.n_classes, bias=False)
+        )
+
+    def embed_text(self, text, attention_mask):
+        findings_embed = self.text_embedding(text)
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        encoded_text = self.text_model(findings_embed, extended_attention_mask).last_hidden_state
+
+        return self.text_cls_norm(encoded_text[:,0]), encoded_text
+
+    def embed_image(self, image):
+
+        img = self.image_model(image).patch_embedding  
+        img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
+
+        queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
+        img = self.img_attn_pool(queries, img)
+        img = self.img_attn_pool_norm(img)
+
+        img = self.perceiver_resampler(img)
+        img = img.squeeze(1)
+
+        ## TODO: img_embeds normalization 필요한가?
+        return img[:,-1], img[:,:-1] ##퍼시벌리셈플러 64+1개 만들어서 1개는 image_embeds로, 64개는 image_tokens로 리턴
+
+    def forward(self, findings, impression, image):
+        return_loss=False,
+        return_embeddings=False
+
+        txt, _, attention_mask = findings
+
+        text_embeds, text_tokens = self.embed_text(txt, attention_mask)
+        # impression_embed = self.text_embdding(txt)
+
+        image_embeds, image_tokens = self.embed_image(image)
+
+        # return embeddings if that is what the researcher wants
+        if return_embeddings:
+            return text_embeds, image_embeds
+
+        for attn_ff, cross_attn in self.multimodal_layers:
+            text_tokens = attn_ff(text_tokens)
+            text_tokens = cross_attn(text_tokens, image_tokens)
+
+        logits = self.to_logits(text_tokens[:,0])
+
+        return logits
+        # if not return_loss:
+        #     return logits
+
+        #### Pretrain 용 Loss 계산
+        # # shorthand
+
+        # ce = F.cross_entropy
+
+        # # calculate caption loss (cross entropy loss)
+
+        # logits = rearrange(logits, 'b n c -> b c n')
+        # caption_loss = ce(logits, labels, ignore_index=self.pad_id)
+        # caption_loss = caption_loss * self.caption_loss_weight
+
+        # # calculate contrastive loss
+
+        # sim = einsum('i d, j d -> i j', text_embeds, image_embeds)
+        # sim = sim * self.temperature.exp()
+        # contrastive_labels = torch.arange(batch, device=device)
+
+        # contrastive_loss = (ce(sim, contrastive_labels) + ce(sim.t(), contrastive_labels)) * 0.5
+        # contrastive_loss = contrastive_loss * self.contrastive_loss_weight
+
+        # return caption_loss + contrastive_loss

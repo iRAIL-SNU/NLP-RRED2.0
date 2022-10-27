@@ -8,10 +8,9 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
-from dataset import JsonlDataset, JsonlDatasetSNUH, JsonlInferDatasetSNUH
+from dataset import JsonlDatasetSNUH, JsonlInferDatasetSNUH
 from vocab import Vocab
 
-import pandas as pd
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DistributedSampler
@@ -20,6 +19,19 @@ from health_multimodal.image.data.transforms import create_chest_xray_transform_
 from health_multimodal.text.model import CXRBertTokenizer
 
 from torchvision.transforms import Compose, RandomAffine, ColorJitter, RandomHorizontalFlip
+from model import *
+
+def get_model(args):
+    if args.multimodal_model_type == "vlbert":
+        return VLBertClf(args)
+    elif args.multimodal_model_type == "flamingo":
+        return CXRFlamingo(args)
+    elif args.multimodal_model_type == "att_pool":
+        return VLModelClf(args)
+    elif args.multimodal_model_type == "coca":
+        return CXRCoCa(args)
+    else:
+        raise(ValueError("Unknown model type: %s" % args.model_type))
 
 
 def get_transforms(args):
@@ -173,7 +185,7 @@ def get_tokenizer(args):
     return tokenizer
 
 
-def get_data_loaders(args):
+def get_dataset(args):
         
     tokenizer = get_tokenizer(args)
     transforms = create_chest_xray_transform_for_inference(
@@ -199,7 +211,7 @@ def get_data_loaders(args):
             vocab,
             args,
             os.path.join(args.data_path, args.Train_dset1_name),
-            is_test=False,
+            set_type='train',
             augmentations=augmentations_img,
         )
 
@@ -212,13 +224,47 @@ def get_data_loaders(args):
             vocab,
             args,
             os.path.join(args.data_path, args.Valid_dset1_name),
-            is_test=True
+            set_type='val',
         )
 
         args.valid_data_len = len(val)
 
-        collate = functools.partial(collate_fn, args=args)
+        return train, val  # , test
 
+    elif args.inference_method == 'single': #for inference
+
+        infer = JsonlInferDatasetSNUH(
+            tokenizer,
+            transforms,
+            vocab,
+            args,
+            input=args.single_input,
+            is_test=True
+        )
+        return infer
+        
+    elif args.inference_method == 'batch': #for inference
+
+        infer = JsonlDatasetSNUH(
+            os.path.join(args.data_path, args.Valid_dset0_name),
+            tokenizer,
+            transforms,
+            vocab,
+            args,
+            os.path.join(args.data_path, args.Valid_dset1_name),
+            set_type='test',
+        )
+
+        args.valid_data_len = len(infer)
+
+        return infer
+
+
+
+def get_data_loaders(args, train=None, val=None):
+    collate = functools.partial(collate_fn, args=args)
+
+    if args.inference_method == None:
         if args.use_ddp and torch.cuda.device_count()>1:
             print(f"Lets Use DDP with {torch.cuda.device_count()} GPUs!!")
             dist.init_process_group("nccl")
@@ -258,35 +304,10 @@ def get_data_loaders(args):
             )
 
         return train_loader, val_loader  # , test
-    elif args.inference_method == 'single': #for inference
 
-        infer = JsonlInferDatasetSNUH(
-            tokenizer,
-            transforms,
-            vocab,
-            args,
-            input=args.single_input,
-            is_test=True
-        )
-        return infer
-        
     elif args.inference_method == 'batch': #for inference
-
-        infer = JsonlDatasetSNUH(
-            os.path.join(args.data_path, args.Valid_dset0_name),
-            tokenizer,
-            transforms,
-            vocab,
-            args,
-            is_test=True
-        )
-
-        args.valid_data_len = len(infer)
-
-        collate = functools.partial(collate_fn, args=args)
-
         infer_loader = DataLoader(
-            infer,
+            val,
             batch_size=args.batch_sz,
             shuffle=False,
             num_workers=args.n_workers,

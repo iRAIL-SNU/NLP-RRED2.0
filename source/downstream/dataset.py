@@ -91,16 +91,16 @@ class JsonlDataset(Dataset):
 
 
 class JsonlDatasetSNUH(Dataset):
-    def __init__(self, data_path, tokenizer, transforms, vocab, args, data_path_1=None, is_test=False, augmentations=None):
+    def __init__(self, data_path, tokenizer, transforms, vocab, args, data_path_1=None, set_type='train', augmentations=None):
         self.args = args
-        self.is_test = is_test
-        self.data_normal = [json.loads(l) for l in open(data_path)]#[:10000]
-        #print("데이터 10000개만 사용!!!!!!!!! "*5)
+        self.set_type = set_type
+        self.data_normal = [json.loads(l) for l in open(data_path)]#[:1000]
+        # print("데이터 10000개만 사용!!!!!!!!! "*5)
         if args.make_error:
             print('ADDING ERROR # '*20)
            #### TEMP error file, 나중에는 data 불러온 다음에 tool 이용해서 에러 추가하도록 해야함.
-            self.data_error = [json.loads(l) for l in open(data_path_1)]#[:10000]
-            #print("데이터 10000개만 사용!!!!!!!!! "*5)
+            self.data_error = [json.loads(l) for l in open(data_path_1)]#[:1000]
+            # print("데이터 10000개만 사용!!!!!!!!! "*5)
 
             for idx in range(len(self.data_normal)):
                 self.data_normal[idx]['label'] = 0
@@ -109,17 +109,21 @@ class JsonlDatasetSNUH(Dataset):
 
             # self.data = self.temp_error_sampler()
             # print('error sampling skipped' * 10)
-            if args.error_sampling==0 or is_test:
+            if args.error_sampling==0 or set_type=='test':
+                print("Errors are just concatted!")
                 self.data = self.data_normal + self.data_error
+            elif args.error_sampling!=0 and set_type=='val':
+                print("Sampling errors at validation set..")
+                self.sample_error()
             else:
-                print("WITH DYNAMIC SAMPLING # "*5)
+                print("# Training errors gonna be sampled WITH DYNAMIC SAMPLING #")
             # print('error is just concatted' * 10)
         else:
             for idx in range(len(self.data_normal)):
                 self.data_normal[idx]['label'] = 0
             self.data = self.data_normal
                     
-        if args.test_with_bootstrap and is_test:
+        if args.test_with_bootstrap and set_type=='test':
             self.data = [random.choice(self.data) for i in range(len(self.data))]
 
         self.data_dir = os.path.dirname(data_path)
@@ -133,6 +137,8 @@ class JsonlDatasetSNUH(Dataset):
         self.unk_tok = "<unk>" if args.model == 'roberta' else "[UNK]"
 
         self.text_start_token = [self.cls_tok]
+        self.image_token = '<image>'
+        # self.image_token = ''
 
         self.max_seq_len = args.max_seq_len
 
@@ -147,18 +153,13 @@ class JsonlDatasetSNUH(Dataset):
 
 
     def __getitem__(self, index):
-        if self.args.error_sampling!=0 and not self.is_test:
-            # sample errors in each epoch
-            sampled_error = random.sample(self.data_error, k=len(self.data_normal)*self.args.error_sampling)
-            self.data = self.data_normal + sampled_error
-
         # sentence shuffling within each section
-        if not self.is_test and self.args.txt_aug =='sentence_shuffling':
+        if self.set_type=='train' and self.args.txt_aug =='sentence_shuffling':
             self.data[index]["Findings"] = shuffle_sentence(self.data[index]["Findings"])
             self.data[index]["Impression"] = shuffle_sentence(self.data[index]["Impression"])
             
         sentence_findings = (
-            self.text_start_token + self.tokenizer(str(self.data[index]["Findings"]))[: (self.max_seq_len-1)]
+            self.text_start_token + self.tokenizer(self.image_token+str(self.data[index]["Findings"]))[: (self.max_seq_len-1)]
             )
         segment_findings = torch.zeros(len(sentence_findings))
         sentence_findings = torch.LongTensor(
@@ -204,11 +205,22 @@ class JsonlDatasetSNUH(Dataset):
             imarray = np.random.rand(2544,3056) * 255
             image = Image.fromarray(imarray.astype('uint8'))
             
-        if not self.is_test:
+        if self.augmentations is not None:
             image = self.augmentations(image)
         image = self.transforms(image)
 
         return sentence_findings, segment_findings, sentence_impression, segment_impression, image, label
+
+
+    def sample_error(self):
+        # This function have to be called at each training epochs
+        if self.args.error_sampling!=0 and self.set_type!='test':
+            print(f'sampling errors for {self.set_type} set!!')
+            # sample errors in each epoch
+            sampled_error = random.sample(self.data_error, k=int(len(self.data_normal)*self.args.error_sampling))
+            self.data = self.data_normal + sampled_error
+        else:
+            raise('error occur when sampling errors')
 
 
     def temp_error_sampler(self):

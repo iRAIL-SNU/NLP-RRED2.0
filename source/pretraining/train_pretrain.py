@@ -10,14 +10,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from vit_pytorch import ViT
-from vit_pytorch.extractor import Extractor
 
 import sys
 sys.path.insert(1, '/home/workspace/source/model/report_coca')
 from report_coca import ReportCoCa
 
-# from models.cxrbert_origin import CXRBERT
+from model import CXRFlamingoForPreTraining
 
 
 from transformers.optimization import AdamW
@@ -316,11 +314,7 @@ class CXRBERT_Trainer():
 class VLCXR_Trainer():
     def __init__(self, args, train_dataloader, test_dataloader=None):
         self.args = args
-
-        cuda_condition = torch.cuda.is_available() and args.with_cuda
-
-        self.device = torch.device("cuda" if cuda_condition else "cpu")
-        print('Current cuda device ', torch.cuda.current_device())  # check
+        self.device = args.device
 
         if args.weight_load: ## TODO!!!!!!!!!!!!!
             config = AutoConfig.from_pretrained(args.pre_trained_model_path)
@@ -332,37 +326,12 @@ class VLCXR_Trainer():
         else:
             print("Initializing model weights with random values")
 
-            vit = ViT(
-                image_size = args.img_size,
-                patch_size = args.patch_size,
-                num_classes = 2, ## not used
-                dim = args.img_embed_sz,
-                depth = args.depth_img_enc,
-                heads = args.num_head_img_enc,
-                mlp_dim = args.img_mlp_hidden_sz
-            )
+            self.model = CXRFlamingoForPreTraining(args).to(self.device)
 
-            vit = Extractor(vit, return_embeddings_only = True, detach = False) 
+        # wandb.watch(self.model)
 
-            self.model = ReportCoCa(
-                dim = args.model_dim,                        # model dimension
-                max_seq_len = args.max_seq_len,                # TODO: max_seq_len should be seperated from dim
-                img_encoder = vit,                           # vision transformer - image encoder, returning image embeddings as (batch, seq, dim)
-                image_dim = args.img_embed_sz,                # image embedding dimension, if not the same as model dimensions
-                num_tokens = args.vocab_size,                  # number of text tokens
-                unimodal_depth = args.unimodal_depth,               # depth of the unimodal transformer
-                multimodal_depth = args.multimodal_depth,          # depth of the multimodal transformer
-                num_img_queries = args.num_img_queries,           # num img_queries
-                dim_head = args.dim_head,                         # dimension per attention head
-                heads = args.num_head_dec,                        # number of attention heads
-                caption_loss_weight = args.captioin_loss_weight,          # weight on the autoregressive caption loss
-                contrastive_loss_weight = args.contrastive_loss_weight,  # weight on the contrastive loss between image and text CLS embeddings
-            ).to(self.device)
-
-        wandb.watch(self.model)
-
-        if args.with_cuda and torch.cuda.device_count() > 1:
-            print("Using %d GPUS for BERT" % torch.cuda.device_count())
+        if args.use_ddp:
+            print("Using %d GPUS" % torch.cuda.device_count())
             print("torch.cuda.current_device(): ", torch.cuda.current_device())
             self.model = DistributedDataParallel(self.model, device_ids=[torch.cuda.current_device()], find_unused_parameters=True)
 
