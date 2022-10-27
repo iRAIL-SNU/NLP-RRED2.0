@@ -17,8 +17,8 @@ import torch.nn as nn
 import torch.optim as optim
 # from pytorch_pretrained_bert import BertAdam
 
-from helpers import get_data_loaders
-from model import VLModelClf, VLBertClf
+from helpers import get_data_loaders, get_dataset, get_model
+
 import sys
 sys.path.insert(1, '/home/workspace/source/utils')
 from utils import *
@@ -42,16 +42,17 @@ def get_args(parser):
     parser.add_argument("--seed", type=int, default=1125)
     parser.add_argument("--batch_sz", type=int, default=32)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--max_epochs", type=int, default=5)
+    parser.add_argument("--max_epochs", type=int, default=20)
 
     parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert'])
     parser.add_argument("--task_type", type=str, default="binary", choices=["multilabel", "classification", "binary"])
+    parser.add_argument("--n_classes", type=int, default=2)
 
     parser.add_argument("--device", type=str, default='cuda')
     parser.add_argument("--use_ddp", type=bool, default=False)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--n_workers", type=int, default=32)
-    parser.add_argument("--patience", type=int, default=100)
+    parser.add_argument("--patience", type=int, default=5)
 
     now = datetime.now()
     now = now.strftime('%Y-%m-%d')
@@ -84,16 +85,25 @@ def get_args(parser):
                         help="valid dset for mimic")
 
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_train_error.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle_First/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_PerceptualOnly/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPR/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_train_error.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_train_error.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10.jsonl',
                         help="train dset for mimic")
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FindingsRandomShuffle_First/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_ImpressionRandomShuffle/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPR/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_val_error.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_val_error.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10.jsonl',
                         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -107,7 +117,7 @@ def get_args(parser):
                         help="test with bootstrap")
     parser.add_argument("--make_error", type=bool, default=True,
                         help="make error?")
-    parser.add_argument("--error_sampling", type=int, default=1,
+    parser.add_argument("--error_sampling", type=float, default=1,
                         help="make error with dinamic sampling?")
 
     parser.add_argument("--error_ids", type=list, default=[],
@@ -122,13 +132,10 @@ def get_args(parser):
     parser.add_argument("--embed_sz", type=int, default=768, choices=[768])
     parser.add_argument("--hidden_sz", type=int, default=768, choices=[768])
 
-    # parser.add_argument("--bert_model", type=str, default="xlm-roberta-base",
     parser.add_argument("--bert_model", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized",
                         choices=["bert-base-uncased, emilyalsentzer/Bio_ClinicalBERT", "xlm-roberta-base", '/home/workspace/Multi-modality-Self-supervision/GatorTron', 'microsoft/BiomedVLP-CXR-BERT-specialized'])
-    # parser.add_argument("--init_model", type=str, default="xlm-roberta-base",
     parser.add_argument("--init_model", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized",
                         choices=["bert-base-uncased", "xlm-roberta-base", 'microsoft/BiomedVLP-CXR-BERT-specialized'])
-
 
     ### image args ###
     parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
@@ -137,8 +144,15 @@ def get_args(parser):
     parser.add_argument("--drop_img_percent", type=float, default=0.0)
     parser.add_argument("--dropout", type=float, default=0.1)
 
-    parser.add_argument("--multimodal_model_type", type=str, default="vlbert", choices=["att_pool", "vlbert"])
-    parser.add_argument("--multimodal_depth", type=int, default=1, choices=[1,2,4,8])
+    parser.add_argument("--multimodal_model_type", type=str, default="flamingo", choices=["att_pool", "vlbert", 'flamingo', 'coca'])
+    parser.add_argument("--multimodal_depth", type=int, default=1, choices=[1,2,4,8,12])
+    parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
+    parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])
+    parser.add_argument("--perceiver_depth", type=int, default=1, choices=[1,2,3,4,8])
+    parser.add_argument("--perceiver_dim_head", type=int, default=64, choices=[64, 128, 256])
+    parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12, 24])
+    parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128, 256])
+    parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "all", "None"])
@@ -168,13 +182,6 @@ def get_args(parser):
     parser.add_argument("--inference_method", type=str, default=None, choices=['batch','single', None])
     parser.add_argument("--test_dset_name", type=str, default='test_error_0509-k1000.jsonl',
                             help="valid dset for SNUH")
-
-
-def get_model(args):
-    if args.multimodal_model_type == "vlbert":
-        return VLBertClf(args)
-    elif args.multimodal_model_type == "att_pool":
-        return VLModelClf(args)
      
 
 def get_criterion(args):
@@ -193,24 +200,6 @@ def get_criterion(args):
 
 def get_optimizer(model, args):
     if args.model in ["mmbt"]:
-    #     total_steps = (
-    #             args.train_data_len
-    #             / args.batch_sz
-    #             / args.gradient_accumulation_steps
-    #             * args.max_epochs
-    #     )
-    #     param_optimizer = list(model.named_parameters())
-    #     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-    #     optimizer_grouped_parameters = [
-    #         {"params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], "weight_decay": 0.01},
-    #         {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay": 0.0, },
-    #     ]
-    #     optimizer = BertAdam(
-    #         optimizer_grouped_parameters,
-    #         lr=args.lr,
-    #         warmup=args.warmup,
-    #         t_total=total_steps,
-    #     )
         optimizer = optim.AdamW(model.parameters(), lr=args.lr)
         
     else:
@@ -230,7 +219,7 @@ def model_eval(i_epoch, data, model, args, criterion, store_preds=False):
         outAUROC = []
 
         for batch in data:
-            loss, out, tgt = model_forward(model, args, criterion, batch, i_epoch)
+            loss, out, tgt = model_forward(model, args, criterion, batch)
             losses.append(loss.item())
 
             if args.task_type == "multilabel":
@@ -297,29 +286,45 @@ def freeze_weight(model, args, i_epoch):
 
     if args.multimodal_model_type == "vlbert":
         m = m.enc
-    else:
-        m = model
 
     if i_epoch < args.freeze_img or args.freeze_img_all:
+        m.image_model.eval()
         for param in m.image_model.parameters():
             param.requires_grad = False
+        print('Freeze image parameters')
     else: 
+        m.image_model.train()
         for param in m.image_model.parameters():
             param.requires_grad = True
+        print('Unfreeze image parameters')
 
     if i_epoch < args.freeze_txt or args.freeze_txt_all:
+        m.text_model.eval()
         for param in m.text_model.parameters():
             param.requires_grad = False
+            
+        if args.multimodal_model_type =="coca":
+            m.text_embedding.eval()
+            for param in m.text_embedding.parameters():
+                param.requires_grad = False
+        print('Freeze text parameters')
+
     else: 
+        m.text_model.train()
         for param in m.text_model.parameters():
             param.requires_grad = True
+            
+        if args.multimodal_model_type =="coca":
+            m.text_embedding.train()
+            for param in m.text_embedding.parameters():
+                param.requires_grad = True
+        print('Unfreeze text parameters')
 
 
-def model_forward(model, args, criterion, batch, i_epoch):
+
+def model_forward(model, args, criterion, batch):
     findings, impression, img, tgt = batch
     device = args.device
-
-    freeze_weight(model, args, i_epoch)
 
     findings = (findings[0].to(device), findings[1].to(device), findings[2].to(device))
     impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
@@ -341,9 +346,8 @@ def train(args):
     args.savedir = os.path.join(args.savedir, args.save_name)
     os.makedirs(args.savedir, exist_ok=True)
 
-    train_loader, val_loader = get_data_loaders(args)
-    # batch = next(iter(train_loader))
-
+    train_dataset, val_dataset = get_dataset(args)
+    train_loader, val_loader = get_data_loaders(args, train_dataset, val_dataset)
 
     model = get_model(args)
     criterion = get_criterion(args)
@@ -355,26 +359,6 @@ def train(args):
 
     start_epoch, global_step, n_no_improve, best_metric = 0, 0, 0, np.inf
 
-    if os.path.exists(os.path.join(args.loaddir, "pytorch_model.bin")):
-        model.load_state_dict(torch.load(args.loaddir + "/pytorch_model.bin"), strict=False)
-        # model.expand_token_type_embeddings()
-
-        print("This would load the trained model.bin, then fine-tune the model.")
-    
-    elif os.path.exists(args.loaddir):
-        model.load_state_dict(torch.load(args.loaddir)['state_dict'], strict=True)
-        # model.expand_token_type_embeddings()
-
-        print("This would load the trained model.pt, then fine-tune the model.")
-
-    else:
-        print("")
-        print("")
-        print("this option initilize the model with random value. train from scratch.")
-        print("Loaded model : ")
-
-
-
     # print("freeze image?", args.freeze_img_all)
     # print("freeze txt?", args.freeze_txt_all)
     model.to(args.device)
@@ -384,25 +368,59 @@ def train(args):
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
 
+
+    if os.path.exists(os.path.join(args.loaddir, "pytorch_model.bin")):
+        model.load_state_dict(torch.load(args.loaddir + "/pytorch_model.bin"), strict=True)
+
+        print("This would load the trained model.bin, then fine-tune the model.")
+    elif os.path.exists(os.path.join(args.loaddir, "model_best.pt")):
+        model.load_state_dict(torch.load(args.loaddir + "/model_best.pt")['state_dict'], strict=True)
+
+        print("This would load the trained model.pt, then fine-tune the model.")
+    
+    elif os.path.exists(args.loaddir):
+        model.load_state_dict(torch.load(args.loaddir)['state_dict'], strict=True)
+
+        print("This would load the trained model.pt, then fine-tune the model.")
+
+    else:
+        print("")
+        print("")
+        print("this option initilize the model with random value. train from scratch.")
+        print("Loaded model : ")
+
     wandb.watch(model,criterion, log="all")
 
     for i_epoch in range(start_epoch, args.max_epochs):
+        if args.error_sampling != 0:
+            train_dataset.sample_error()
+            train_loader, val_loader = get_data_loaders(args, train_dataset, val_dataset)
+
         train_losses = []
-        print_step = 100
+        print_step = 100*args.gradient_accumulation_steps
         loss_sum = 0
 
         model.train()
         optimizer.zero_grad()
 
+        if args.multimodal_model_type == "flamingo":
+            log_tanh_gating(model,args)
+
+        if args.multimodal_model_type not in ["flamingo"]:
+            freeze_weight(model, args, i_epoch) 
+
         for step, batch in enumerate(tqdm(train_loader, total=len(train_loader))):
-            loss, out, target = model_forward(model, args, criterion, batch, i_epoch)
+
+            loss, out, target = model_forward(model, args, criterion, batch)
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
 
             loss_sum += loss.item()
             if step % print_step == 0 and step!=0:
-                print(f'avg_train_loss for {print_step} steps: {loss_sum/print_step}')
+                print(f'avg_train_loss for {print_step} steps: {(loss_sum*args.gradient_accumulation_steps)/print_step}')
                 loss_sum = 0
+                if args.multimodal_model_type == "flamingo":
+                    log_tanh_gating(model, args)
 
             train_losses.append(loss.item())
             loss.backward()

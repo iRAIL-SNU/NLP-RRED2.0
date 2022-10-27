@@ -1,34 +1,30 @@
 import os
 import pandas as pd
 
-from transformers.utils.dummy_tf_objects import WarmUp
-
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 # os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
 
-import csv
 import argparse
 from sklearn.metrics import RocCurveDisplay, accuracy_score, confusion_matrix, plot_roc_curve, precision_recall_curve, PrecisionRecallDisplay, average_precision_score, RocCurveDisplay, auc, roc_curve
 from tqdm import tqdm
 from datetime import datetime
 
 import torch.nn as nn
-import torch.optim as optim
 
-from helpers import get_data_loaders
-from model import VLModelClf
+from helpers import get_data_loaders, get_model, get_dataset
 import sys
 sys.path.insert(1, '/home/workspace/source/utils')
 from utils import *
 
 from logger import create_logger
-import wandb
 
 import torch
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DistributedSampler
 from matplotlib import pyplot as plt
+
+import json
+import shutil
+import openpyxl
+import pytz
 
 
 def model_eval(args, data):
@@ -133,7 +129,7 @@ def get_args(parser):
     parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'cxr-bert'])
     parser.add_argument("--task_type", type=str, default="binary", choices=["multilabel", "classification", "binary"])
 
-    parser.add_argument("--device", type=str, default='cuda')
+    parser.add_argument("--device", type=str, default='cuda', choices=["cuda", 'cpu'])
     parser.add_argument("--n_workers", type=int, default=16)
     parser.add_argument("--patience", type=int, default=2)
 
@@ -142,7 +138,24 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-08-23/factualOnly_freeze/model_best.pt'
     # 'workspace/source/downstream/training_output2022-08-25/RandomShuffle_dropna_poolAttTxt_freeze/model_best.pt'
     # 'workspace/source/downstream/training_output2022-08-25/FactualOnly_dropna_poolAttTxt_freeze/model_best.pt'
-    'workspace/source/downstream/training_output2022-08-25/RandomShuffle_dropna_poolAttTxt_freeze_augImgTxt/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-08-25/RandomShuffle_dropna_poolAttTxt_freeze_augImgTxt/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-08-26/FactualOnly_dropna_VLBERT_augImgTxt/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-08-30/FactualOnly_Flamingo_every1/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-01/FactualOnly_Flamingo_every3_imgtok/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-01/FactualOnly_Flamingo_every3_withImg/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-02/PerceptualOnly_Flamingo_every3_withImg/model_best.pt'
+    
+    # 'workspace/source/downstream/training_output2022-09-06/Mixed_FPR_Flamingo_every3_withImg_again/model_best.pt'
+    
+    # 'workspace/source/downstream/training_output2022-09-09/Mixed_FPI_v0.1_Flamingo_every3_withImg/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-14/Mixed_FPI_v0.1_Flamingo_every1_withImg/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-26/Mixed_FPI_v0.1_Flamingo_every1_withImg_single->cross/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-15/Mixed_FPI_v0.1_VLBERT_depth1/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-29/Mixed_FPI_v0.1_CoCa_dpth12_resampler-base_numtok64/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-09-30/Mixed_FPI_v0.1_CoCa_dpth12_resampler-large_numtok128/model_best.pt'
+    
+    'workspace/source/downstream/training_output2022-10-10/Mixed_FPI_v0.2_Flamingo_every1_withImg_single->cross/model_best.pt'
+
     )
     parser.add_argument("--resultdir", type=str, default='workspace/inference_result')
 
@@ -153,6 +166,12 @@ def get_args(parser):
 
     parser.add_argument("--Valid_dset0_name", type=str, default='frontal_test.jsonl',
                         help="valid dset for mimic")
+    parser.add_argument("--Valid_dset1_name", type=str, 
+        # default='error_baseline_PerceptualOnly/frontal_test_error.jsonl',
+        # default='error_baseline_Mixed_FPR/frontal_test_error.jsonl',
+        # default='error_baseline_Mixed_FPI_v0.1/frontal_test_error.jsonl',
+        default='error_baseline_Mixed_FPI_v0.2/frontal_test_error.jsonl',
+        help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
                     help="mimic-cxr or indiana")
@@ -164,12 +183,11 @@ def get_args(parser):
 
     parser.add_argument("--test_with_bootstrap", type=bool, default=False,
                         help="test with bootstrap")
-    parser.add_argument("--make_error", type=bool, default=False,
+    parser.add_argument("--make_error", type=bool, default=True,
                         help="make error?")
     parser.add_argument("--error_sampling", type=int, default=0,
                         help="make error with dinamic sampling?")
-    parser.add_argument("--clean_data", type=bool, default=False,
-                        help="clean data?")
+
 ##########################
 ##########################
 ##########################
@@ -187,8 +205,20 @@ def get_args(parser):
     parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
     parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=480)
 
-    parser.add_argument("--multimodal_model_type", type=str, default="att_pool", choices=["att_pool", "transformer"])
+    parser.add_argument("--dropout", type=float, default=0.1)
+
+    parser.add_argument("--multimodal_model_type", type=str, default="flamingo", choices=["att_pool", "vlbert", 'flamingo', 'coca'])
+    parser.add_argument("--multimodal_depth", type=int, default=12, choices=[1,2,4,8,12])
+    parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
+    parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])
+    parser.add_argument("--perceiver_depth", type=int, default=1, choices=[1,2,3,4])
+    parser.add_argument("--perceiver_dim_head", type=int, default=64, choices=[64, 128])
+    parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12])
+    parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
+    parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
+
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
+    parser.add_argument("--img_hidden_sz", type=int, default=2048)
 
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--max_seq_len", type=int, default=512)
@@ -207,15 +237,10 @@ if __name__=='__main__':
     print("Model Test")
     print(" # PID :", os.getpid())
 
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # args.device = device
-    # device = "cpu" 
-    # print('device is cpu'*30)
-
     args.n_classes = 2
     
-    model = VLModelClf(args)
-    if torch.cuda.device_count() > 1 and args.device != torch.device('cpu'):
+    model = get_model(args)
+    if torch.cuda.device_count() > 1 and args.device != 'cpu':
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
     model.load_state_dict(torch.load(args.loaddir)['state_dict'], strict=True)
@@ -230,9 +255,10 @@ if __name__=='__main__':
         seed = test_i if args.test_with_bootstrap else args.seed
         set_seed(seed)
 
-        val_loader = get_data_loaders(args)
+        val_dataset = get_dataset(args)
+        val_loader = get_data_loaders(args, val=val_dataset)
         tgt, _, total_outs  = model_eval(args, val_loader)
-        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.8, resultdir=args.resultdir)
+        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.5, resultdir=args.resultdir)
 
         metrics_li.append(metrics)
 
@@ -270,24 +296,55 @@ if __name__=='__main__':
     fn_idx = [p for p in pred0 if p in true1 ]
 
 
-    import json
+
     data = [json.loads(l) for l in open(os.path.join(args.data_path, args.Valid_dset0_name))]
+    if args.make_error:
+        data_error = [json.loads(l) for l in open(os.path.join(args.data_path, args.Valid_dset1_name))]
+        data = data+data_error
+
     data = pd.DataFrame(data)
 
-    fp_dataframe = pd.DataFrame()
-    fp_dataframe['idx'] = fp_idx
+    def get_result_dataframe(idx):
+        dataframe = pd.DataFrame()
+        dataframe['idx'] = idx
 
-    fp_dataframe['dicom_id'] = [d for d in data.loc[fp_idx]['dicom_id']]
-    fp_dataframe['study_id'] = [d for d in data.loc[fp_idx]['study_id']]
-    fp_dataframe['subject_id'] = [d for d in data.loc[fp_idx]['subject_id']]
-    fp_dataframe['findings'] = [d for d in data.loc[fp_idx]['Findings']]
-    fp_dataframe['impression'] = [d for d in data.loc[fp_idx]['Impression']]
-    fp_dataframe['p(error)'] = np.array(probs)[fp_idx]
-    # fp_dataframe['background'] = [d for d in data.loc[fp_idx]['background']]
-    fp_dataframe=fp_dataframe.sort_values('p(error)', ascending=False)
+        dataframe['dicom_id'] = [d for d in data.loc[idx]['dicom_id']]
+        dataframe['study_id'] = [d for d in data.loc[idx]['study_id']]
+        dataframe['subject_id'] = [d for d in data.loc[idx]['subject_id']]
+        dataframe['findings'] = [d for d in data.loc[idx]['Findings']]
+        dataframe['impression'] = [d for d in data.loc[idx]['Impression']]
+        dataframe['error_type'] = [d for d in data.loc[idx]['error_subtype']]
+        dataframe['p(error)'] = np.array(probs)[idx]
+        # dataframe['background'] = [d for d in data.loc[idx]['background']]
+        dataframe=dataframe.sort_values('p(error)', ascending=False)
+
+        return dataframe
+
+    tp_dataframe = get_result_dataframe(tp_idx)
+    fp_dataframe = get_result_dataframe(fp_idx)
+    fn_dataframe = get_result_dataframe(fn_idx)
 
 
-    import pytz
+    def make_infer_output(dataframe, output_path, output_img_path, filename):
+        dataframe.to_excel(os.path.join(output_path, filename),header=True, index=False, encoding='utf-8-sig')
+
+        wb = openpyxl.load_workbook(os.path.join(output_path, filename))
+        sheet = wb.active
+
+        for i in tqdm(range(len(dataframe))):
+            image_path = make_image_path(dataframe.iloc[i], base_dir=args.data_dir_img, dataset='mimic-cxr')
+
+            shutil.copyfile(image_path, os.path.join(output_img_path, dataframe.iloc[i]['dicom_id']+'.jpg'))
+            
+            dicom_id = sheet["B"][i+1].value
+            sheet["B"][i+1].value = '=HYPERLINK("{}")'.format(f'images/{dataframe.iloc[i]["dicom_id"]}'+'.jpg')
+
+        sheet.column_dimensions["E"].width = 100
+        sheet.column_dimensions["F"].width = 50
+        wb.save(os.path.join(output_path, filename))
+
+
+    ### Save
     now = datetime.now(tz=pytz.timezone('Asia/Tokyo'))
     now = now.strftime("%y%m%d-%H%M%S")
     output_path = os.path.join(args.resultdir, str(now)+'_'+model_setting_name)
@@ -299,33 +356,9 @@ if __name__=='__main__':
         os.chmod(output_img_path, 0o777)
     print('output_path: ', output_path)
 
-
-    import shutil
-    import openpyxl
-    from openpyxl.styles import Alignment
-
-    ### Save False positive example file
-    filename = 'False_Positive_Examples_rred2.xlsx'
-
-    # fp_dataframe.to_csv('False_Positive_Examples_rred2_0823.csv',header=True, index=False, encoding='utf-8-sig')
-    fp_dataframe.to_excel(os.path.join(output_path, filename),header=True, index=False, encoding='utf-8-sig')
-
-    wb = openpyxl.load_workbook(os.path.join(output_path, filename))
-    sheet = wb.active
-
-    for i in range(len(fp_dataframe)):
-        image_path = make_image_path(fp_dataframe.iloc[i], base_dir=args.data_dir_img, dataset='mimic-cxr')
-
-        shutil.copyfile(image_path, os.path.join(output_img_path, fp_dataframe.iloc[i]['dicom_id']+'.jpg'))
-        
-        dicom_id = sheet["B"][i+1].value
-        print(dicom_id)
-        sheet["B"][i+1].value = '=HYPERLINK("{}")'.format(f'images/{fp_dataframe.iloc[i]["dicom_id"]}'+'.jpg')
-
-    sheet.column_dimensions["E"].width = 100
-    sheet.column_dimensions["F"].width = 50
-    wb.save(os.path.join(output_path, filename))
-
+    make_infer_output(tp_dataframe, output_path, output_img_path, 'True_Positive_Examples_rred2.xlsx')
+    make_infer_output(fp_dataframe, output_path, output_img_path, 'False_Positive_Examples_rred2.xlsx')
+    make_infer_output(fn_dataframe, output_path, output_img_path, 'False_Negative_Examples_rred2.xlsx')
 
 
 
