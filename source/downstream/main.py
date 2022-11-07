@@ -93,7 +93,8 @@ def get_args(parser):
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPR/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_train_error.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_train_error_v1_to_v10.jsonl',
                         help="train dset for mimic")
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
@@ -103,7 +104,8 @@ def get_args(parser):
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPR/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_val_error.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_val_error_v1_to_v10.jsonl',
                         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -117,7 +119,9 @@ def get_args(parser):
                         help="test with bootstrap")
     parser.add_argument("--make_error", type=bool, default=True,
                         help="make error?")
-    parser.add_argument("--error_sampling", type=float, default=1,
+    parser.add_argument("--error_sampling_train", type=float, default=1,
+                        help="make error with dinamic sampling?")
+    parser.add_argument("--error_sampling_test", type=float, default=0.08,
                         help="make error with dinamic sampling?")
 
     parser.add_argument("--error_ids", type=list, default=[],
@@ -392,9 +396,9 @@ def train(args):
     wandb.watch(model,criterion, log="all")
 
     for i_epoch in range(start_epoch, args.max_epochs):
-        if args.error_sampling != 0:
+        if args.error_sampling_train != 0:
             train_dataset.sample_error()
-            train_loader, val_loader = get_data_loaders(args, train_dataset, val_dataset)
+            train_loader, _ = get_data_loaders(args, train_dataset, val_dataset)
 
         train_losses = []
         print_step = 100*args.gradient_accumulation_steps

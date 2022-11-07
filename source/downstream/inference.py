@@ -154,7 +154,11 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-09-29/Mixed_FPI_v0.1_CoCa_dpth12_resampler-base_numtok64/model_best.pt'
     # 'workspace/source/downstream/training_output2022-09-30/Mixed_FPI_v0.1_CoCa_dpth12_resampler-large_numtok128/model_best.pt'
     
-    'workspace/source/downstream/training_output2022-10-10/Mixed_FPI_v0.2_Flamingo_every1_withImg_single->cross/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-10-10/Mixed_FPI_v0.2_Flamingo_every1_withImg_single->cross/model_best.pt'
+    
+    # 'workspace/source/downstream/training_output2022-10-27/v0.3_0.08_Flamingo/model_best.pt'
+    'workspace/source/downstream/training_output2022-10-28/v0.3_1.00_Flamingo/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-11-02/v0.3_10.0_Flamingo/model_best.pt'
 
     )
     parser.add_argument("--resultdir", type=str, default='workspace/inference_result')
@@ -170,7 +174,8 @@ def get_args(parser):
         # default='error_baseline_PerceptualOnly/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPR/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPI_v0.1/frontal_test_error.jsonl',
-        default='error_baseline_Mixed_FPI_v0.2/frontal_test_error.jsonl',
+        # default='error_baseline_Mixed_FPI_v0.2/frontal_test_error.jsonl',
+        default='error_baseline_Mixed_FPI_v0.3/frontal_test_error_v1_to_v10.jsonl',
         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -185,7 +190,7 @@ def get_args(parser):
                         help="test with bootstrap")
     parser.add_argument("--make_error", type=bool, default=True,
                         help="make error?")
-    parser.add_argument("--error_sampling", type=int, default=0,
+    parser.add_argument("--error_sampling_test", type=int, default=0,
                         help="make error with dinamic sampling?")
 
 ##########################
@@ -258,7 +263,7 @@ if __name__=='__main__':
         val_dataset = get_dataset(args)
         val_loader = get_data_loaders(args, val=val_dataset)
         tgt, _, total_outs  = model_eval(args, val_loader)
-        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.5, resultdir=args.resultdir)
+        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.9, resultdir=args.resultdir)
 
         metrics_li.append(metrics)
 
@@ -325,19 +330,20 @@ if __name__=='__main__':
     fn_dataframe = get_result_dataframe(fn_idx)
 
 
-    def make_infer_output(dataframe, output_path, output_img_path, filename):
+    def make_infer_output(dataframe, output_path, output_img_path, filename, save_img=True):
         dataframe.to_excel(os.path.join(output_path, filename),header=True, index=False, encoding='utf-8-sig')
 
         wb = openpyxl.load_workbook(os.path.join(output_path, filename))
         sheet = wb.active
 
-        for i in tqdm(range(len(dataframe))):
-            image_path = make_image_path(dataframe.iloc[i], base_dir=args.data_dir_img, dataset='mimic-cxr')
+        if save_img:
+            for i in tqdm(range(len(dataframe))):
+                image_path = make_image_path(dataframe.iloc[i], base_dir=args.data_dir_img, dataset='mimic-cxr')
 
-            shutil.copyfile(image_path, os.path.join(output_img_path, dataframe.iloc[i]['dicom_id']+'.jpg'))
-            
-            dicom_id = sheet["B"][i+1].value
-            sheet["B"][i+1].value = '=HYPERLINK("{}")'.format(f'images/{dataframe.iloc[i]["dicom_id"]}'+'.jpg')
+                shutil.copyfile(image_path, os.path.join(output_img_path, dataframe.iloc[i]['dicom_id']+'.jpg'))
+                
+                dicom_id = sheet["B"][i+1].value
+                sheet["B"][i+1].value = '=HYPERLINK("{}")'.format(f'images/{dataframe.iloc[i]["dicom_id"]}'+'.jpg')
 
         sheet.column_dimensions["E"].width = 100
         sheet.column_dimensions["F"].width = 50
