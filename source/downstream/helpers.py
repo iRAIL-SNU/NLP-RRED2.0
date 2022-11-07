@@ -239,7 +239,7 @@ def get_dataset(args):
             vocab,
             args,
             input=args.single_input,
-            is_test=True
+            set_type='test',
         )
         return infer
         

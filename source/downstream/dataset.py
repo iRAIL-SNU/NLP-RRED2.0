@@ -107,15 +107,16 @@ class JsonlDatasetSNUH(Dataset):
             for idx in range(len(self.data_error)):
                 self.data_error[idx]['label'] = 1
 
-            # self.data = self.temp_error_sampler()
-            # print('error sampling skipped' * 10)
-            if args.error_sampling==0 or set_type=='test':
+            self.error_sampling = args.error_sampling_train if set_type == 'train' else args.error_sampling_test
+                
+            if self.error_sampling==0:# or set_type=='test':
                 print("Errors are just concatted!")
                 self.data = self.data_normal + self.data_error
-            elif args.error_sampling!=0 and set_type=='val':
+            elif self.error_sampling!=0 and set_type!='train':
                 print("Sampling errors at validation set..")
                 self.sample_error()
             else:
+                 # self.sample_error() have to be called at each training epochs
                 print("# Training errors gonna be sampled WITH DYNAMIC SAMPLING #")
             # print('error is just concatted' * 10)
         else:
@@ -146,8 +147,8 @@ class JsonlDatasetSNUH(Dataset):
         self.augmentations = augmentations
 
     def __len__(self):
-        if self.args.error_sampling!=0:
-            return len(self.data_normal)+int(len(self.data_normal)*self.args.error_sampling)
+        if self.error_sampling!=0:
+            return len(self.data_normal)+int(len(self.data_normal)*self.error_sampling)
         else:
             return len(self.data)
 
@@ -213,11 +214,10 @@ class JsonlDatasetSNUH(Dataset):
 
 
     def sample_error(self):
-        # This function have to be called at each training epochs
-        if self.args.error_sampling!=0 and self.set_type!='test':
+        if self.error_sampling!=0:# and self.set_type!='test':
             print(f'sampling errors for {self.set_type} set!!')
             # sample errors in each epoch
-            sampled_error = random.sample(self.data_error, k=int(len(self.data_normal)*self.args.error_sampling))
+            sampled_error = random.sample(self.data_error, k=int(len(self.data_normal)*self.error_sampling))
             self.data = self.data_normal + sampled_error
         else:
             raise('error occur when sampling errors')
