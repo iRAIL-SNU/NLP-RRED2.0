@@ -7,7 +7,6 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 import argparse
 from sklearn.metrics import RocCurveDisplay, accuracy_score, confusion_matrix, plot_roc_curve, precision_recall_curve, PrecisionRecallDisplay, average_precision_score, RocCurveDisplay, auc, roc_curve
 from tqdm import tqdm
-from datetime import datetime
 
 import torch.nn as nn
 
@@ -25,6 +24,7 @@ import json
 import shutil
 import openpyxl
 import pytz
+from datetime import datetime
 
 
 def model_eval(args, data):
@@ -33,7 +33,7 @@ def model_eval(args, data):
         preds, tgts, total_outs = [], [], []
         step = 0
         for batch in tqdm(data):
-            findings, impression, img, tgt = batch
+            findings, impression, img, tgt, prev_img = batch
             step += 1
 
             # #####################
@@ -45,12 +45,15 @@ def model_eval(args, data):
             findings = (findings[0].to(device), findings[1].to(device), findings[2].to(device))
             impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
             img = img.to(device)
+            prev_img = prev_img.to(device) if args.use_prev_img else None
+
+            
 
             total_out = torch.zeros([args.batch_sz,2]).to(device)
             single_outs = []
 
-            out = model(findings, impression, img)
-
+            out = model(findings, impression, (img, prev_img))
+            
             tgt = tgt.to(device)
             tgt = tgt.cpu().detach().numpy()
 
@@ -157,9 +160,16 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-10-10/Mixed_FPI_v0.2_Flamingo_every1_withImg_single->cross/model_best.pt'
     
     # 'workspace/source/downstream/training_output2022-10-27/v0.3_0.08_Flamingo/model_best.pt'
-    'workspace/source/downstream/training_output2022-10-28/v0.3_1.00_Flamingo/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-10-28/v0.3_1.00_Flamingo/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-11-07/v0.3unif_1.0_Flamingo/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-02/v0.3_10.0_Flamingo/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-11-16/v0.3_1.00_flamingo_rrc/model_best.pt'
+    'workspace/source/downstream/training_output2022-11-16/v0.3_1.00_flamingo_rrc/checkpoint.pt'
+    
+    # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
 
+    # 'workspace/source/downstream/training_output2022-11-09/v0.3_1.00_coca/model_best.pt' #depth 1
+    # 'workspace/source/downstream/training_output2022-11-10/v0.3_1.00_coca_depth12/model_best.pt' #depth 12
     )
     parser.add_argument("--resultdir", type=str, default='workspace/inference_result')
 
@@ -168,14 +178,14 @@ def get_args(parser):
 ##########################
 ########################## 
 
-    parser.add_argument("--Valid_dset0_name", type=str, default='frontal_test.jsonl',
+    parser.add_argument("--Valid_dset0_name", type=str, default='frontal_test_w_prev.jsonl',
                         help="valid dset for mimic")
     parser.add_argument("--Valid_dset1_name", type=str, 
         # default='error_baseline_PerceptualOnly/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPR/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPI_v0.1/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPI_v0.2/frontal_test_error.jsonl',
-        default='error_baseline_Mixed_FPI_v0.3/frontal_test_error_v1_to_v10.jsonl',
+        default='error_baseline_Mixed_FPI_v0.3/frontal_test_error_v1_to_v10_w_prev.jsonl',
         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -190,7 +200,7 @@ def get_args(parser):
                         help="test with bootstrap")
     parser.add_argument("--make_error", type=bool, default=True,
                         help="make error?")
-    parser.add_argument("--error_sampling_test", type=int, default=0,
+    parser.add_argument("--error_sampling_test", type=int, default=1,
                         help="make error with dinamic sampling?")
 
 ##########################
@@ -221,6 +231,8 @@ def get_args(parser):
     parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12])
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
+    parser.add_argument("--use_prev_img", type=bool, default=False)
+
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_hidden_sz", type=int, default=2048)
@@ -263,7 +275,7 @@ if __name__=='__main__':
         val_dataset = get_dataset(args)
         val_loader = get_data_loaders(args, val=val_dataset)
         tgt, _, total_outs  = model_eval(args, val_loader)
-        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.9, resultdir=args.resultdir)
+        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.903, resultdir=args.resultdir)
 
         metrics_li.append(metrics)
 
@@ -329,6 +341,27 @@ if __name__=='__main__':
     fp_dataframe = get_result_dataframe(fp_idx)
     fn_dataframe = get_result_dataframe(fn_idx)
 
+    def get_recall_for_each_type(tp_idx, fn_idx):
+        tp_df = get_result_dataframe(tp_idx)
+        error_df = get_result_dataframe(tp_idx+fn_idx)
+        error_types = list(error_df['error_type'].unique())
+        
+        total_count = {}
+        for error_type in error_types:
+            total_count[error_type] = sum(error_df['error_type']==error_type)
+            
+        total_count = dict(sorted(total_count.items(), key=lambda x: x[1], reverse=True))
+        recall = total_count.copy()
+
+        for error_type in error_types:
+            recall[error_type] = sum(tp_df['error_type']==error_type) / total_count[error_type]
+            
+        return recall
+
+    recall_for_each_type = get_recall_for_each_type(tp_idx, fn_idx)
+    print(recall_for_each_type)
+
+
 
     def make_infer_output(dataframe, output_path, output_img_path, filename, save_img=True):
         dataframe.to_excel(os.path.join(output_path, filename),header=True, index=False, encoding='utf-8-sig')
@@ -362,9 +395,10 @@ if __name__=='__main__':
         os.chmod(output_img_path, 0o777)
     print('output_path: ', output_path)
 
-    make_infer_output(tp_dataframe, output_path, output_img_path, 'True_Positive_Examples_rred2.xlsx')
-    make_infer_output(fp_dataframe, output_path, output_img_path, 'False_Positive_Examples_rred2.xlsx')
-    make_infer_output(fn_dataframe, output_path, output_img_path, 'False_Negative_Examples_rred2.xlsx')
+    make_infer_output(tp_dataframe, output_path, output_img_path, 'True_Positive_Examples_rred2.xlsx', save_img=False)
+    make_infer_output(fp_dataframe, output_path, output_img_path, 'False_Positive_Examples_rred2.xlsx', save_img=False)
+    make_infer_output(fn_dataframe, output_path, output_img_path, 'False_Negative_Examples_rred2.xlsx', save_img=False)
+
 
 
 

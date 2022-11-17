@@ -9,9 +9,15 @@ sys.path.insert(1, '/home/workspace/source/model/report_coca')
 from report_coca import CrossAttention, LayerNorm
 from flamingo_pytorch import PerceiverResampler, GatedCrossAttentionBlock
 from flamingo_pytorch.flamingo_palm import *
+
+# sys.path.insert(1, '/home/workspace/Medical_X-VL')
+# from models.ibot_vit import VisionTransformer, interpolate_pos_embed, vit_base, vit_small
+# from models.xbert import BertConfig, BertModel
+# from models.model_retrieval import XVLModel
+
 from einops import rearrange, repeat
 
-from transformers import BertConfig, BertModel
+import transformers
 
 MODEL_TYPE = "resnet50"
 
@@ -127,8 +133,8 @@ class VLBertEncoder(nn.Module):
         super(VLBertEncoder, self).__init__()
         self.args = args
 
-        config = BertConfig(num_hidden_layers=self.args.multimodal_depth)
-        vlbert = BertModel(config)
+        config = transformers.BertConfig(num_hidden_layers=self.args.multimodal_depth)
+        vlbert = transformers.BertModel(config)
         
         self.txt_embeddings = vlbert.embeddings
         self.dropout = nn.Dropout(p=args.dropout)
@@ -238,24 +244,29 @@ class CXRFlamingo(nn.Module):
     def forward(self, findings, impression, image):
         txt, _, attention_mask = findings
 
-        img = self.image_model(image).patch_embedding  
-        img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
+        image, prev_image = image
+        img = self.image_model(image).patch_embedding  # Bxn_channelxWxH --> Bx2048x15x15
+        img = img.resize(img.shape[0],img.shape[2]*img.shape[3],self.args.img_hidden_sz)# Bx2048x15x15 --> Bx15x15x2048
 
-        ####
         queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
         img = self.img_attn_pool(queries, img)
-        img = self.img_attn_pool_norm(img)
-        ####
+        img = self.img_attn_pool_norm(img) # Bx225x768
+        
+        #use prev report
+        if self.args.use_prev_img:
+            prev_img = self.image_model(prev_image).patch_embedding  # Bxn_channelxWxH --> Bx2048x15x15
+            prev_img = prev_img.resize(prev_img.shape[0],prev_img.shape[2]*prev_img.shape[3],self.args.img_hidden_sz)# Bx2048x15x15 --> Bx15x15x2048
 
-        img = self.perceiver_resampler(img)
+            prev_queries = repeat(self.img_queries, 'n d -> b n d', b=prev_img.shape[0])
+            prev_img = self.img_attn_pool(prev_queries, prev_img)
+            prev_img = self.img_attn_pool_norm(prev_img) # Bx225x768
 
-        ####
-        # queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
-        # img = img.squeeze(1)
-        # img = self.img_attn_pool(queries, img)
-        # img = self.img_attn_pool_norm(img)
-        # img = img.unsqueeze(1)
-        ####
+            img = rearrange(img, 'b n d -> b 1 n d')
+            prev_img = rearrange(prev_img, 'b n d -> b 1 n d')
+                    
+            img = torch.cat((img,prev_img), dim=1)
+                    
+        img = self.perceiver_resampler(img) 
 
         findings_embed = self.text_embdding(txt)
         # impression_embed = self.text_embdding(txt)
@@ -274,10 +285,11 @@ class CXRFlamingo(nn.Module):
                 if exists(xattn_layer) and exists(img):
                     findings_embed = xattn_layer(findings_embed, img)
 
-        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.squeeze(1))
+        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
         img = self.img_attn_pool_norm_last(img)
 
-        return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1))
+        return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1)) #### 이거 findings_embed[:,0,:] 으로 해보자
+        # return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,0,:]), 1)) 
 
 
     # def forward(self, findings, impression, image):
@@ -575,3 +587,31 @@ class CXRCoCa(nn.Module):
         # contrastive_loss = contrastive_loss * self.contrastive_loss_weight
 
         # return caption_loss + contrastive_loss
+
+
+# class XVL(nn.Module):
+#     def __init__(self, args):
+#         super(XVL,self).__init__()
+#         import argparse
+#         import ruamel.yaml as yaml
+#         from transformers import AutoTokenizer
+        
+#         parser = argparse.ArgumentParser()
+#         parser.add_argument('--config', default='./configs/Detection.yaml')
+#         parser.add_argument('--output_dir', default='output/Detection')
+#         parser.add_argument('--checkpoint', default='')
+#         parser.add_argument('--text_encoder', default='bert-base-uncased')
+#         parser.add_argument('--evaluate', action='store_true')
+#         parser.add_argument('--device', default='cuda')
+#         parser.add_argument('--seed', default=42, type=int)
+#         parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')
+#         parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+#         parser.add_argument('--distributed', default=True, type=bool)
+#         args = parser.parse_args()
+
+#         config = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
+        
+#         tokenizer = AutoTokenizer.from_pretrained("./my_tokenizer/")
+#         xvlmodel = XVLModel(config, tokenizer)
+    
+#         print('done')
