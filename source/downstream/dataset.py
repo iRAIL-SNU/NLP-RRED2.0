@@ -197,20 +197,13 @@ class JsonlDatasetSNUH(Dataset):
         else:
             print( 'check task_type')
 
-        image_path = make_image_path(self.data[index], base_dir=self.args.data_dir_img, dataset='mimic-cxr')
+        image_path, prev_image_path = make_image_path(self.data[index], base_dir=self.args.data_dir_img, dataset='mimic-cxr')
 
-        image = None
-        if os.path.isfile(image_path):
-            image = Image.open(image_path)
-        else:
-            imarray = np.random.rand(2544,3056) * 255
-            image = Image.fromarray(imarray.astype('uint8'))
-            
-        if self.augmentations is not None:
-            image = self.augmentations(image)
-        image = self.transforms(image)
-
-        return sentence_findings, segment_findings, sentence_impression, segment_impression, image, label
+        image = self.get_image_with_transform(image_path)
+        prev_image = self.get_image_with_transform(prev_image_path) if self.args.use_prev_img else None
+        # prev_findings, prev_impression
+        
+        return sentence_findings, segment_findings, sentence_impression, segment_impression, image, label, prev_image
 
 
     def sample_error(self):
@@ -221,6 +214,20 @@ class JsonlDatasetSNUH(Dataset):
             self.data = self.data_normal + sampled_error
         else:
             raise('error occur when sampling errors')
+
+    def get_image_with_transform(self, image_path):
+        image = None
+        if image_path is not None and os.path.isfile(image_path):
+            image = Image.open(image_path)
+        else:
+            imarray = np.random.rand(2544,3056) * 255
+            image = Image.fromarray(imarray.astype('uint8'))
+            
+        if self.augmentations is not None:
+            image = self.augmentations(image)
+        image = self.transforms(image)
+        
+        return image
 
 
     def temp_error_sampler(self):

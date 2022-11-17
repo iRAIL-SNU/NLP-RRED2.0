@@ -11,7 +11,6 @@ import csv
 import argparse
 from sklearn.metrics import f1_score, accuracy_score, roc_auc_score, confusion_matrix
 from tqdm import tqdm
-from datetime import datetime
 
 import torch.nn as nn
 import torch.optim as optim
@@ -30,6 +29,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DistributedSampler
+from datetime import datetime
 
 # ###
 # import os
@@ -77,10 +77,12 @@ def get_args(parser):
 ########################## 
 
 
-    parser.add_argument("--Train_dset0_name", type=str, default='frontal_train.jsonl',
+    # parser.add_argument("--Train_dset0_name", type=str, default='frontal_train.jsonl',
+    parser.add_argument("--Train_dset0_name", type=str, default='frontal_train_w_prev.jsonl',
     # parser.add_argument("--Train_dset0_name", type=str, default='frontal_first_train.jsonl',
                         help="train dset for mimic")
-    parser.add_argument("--Valid_dset0_name", type=str, default='frontal_val.jsonl',
+    # parser.add_argument("--Valid_dset0_name", type=str, default='frontal_val.jsonl',
+    parser.add_argument("--Valid_dset0_name", type=str, default='frontal_val_w_prev.jsonl',
     # parser.add_argument("--Valid_dset0_name", type=str, default='frontal_first_val.jsonl',
                         help="valid dset for mimic")
 
@@ -94,7 +96,8 @@ def get_args(parser):
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_train_error_v1_to_v10.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10_w_prev.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_train_error_v1_to_v10.jsonl',
                         help="train dset for mimic")
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_FactualOnly/frontal_val_error.jsonl',
@@ -105,7 +108,8 @@ def get_args(parser):
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_val_error_v1_to_v10.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10_w_prev.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_val_error_v1_to_v10.jsonl',
                         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -121,7 +125,7 @@ def get_args(parser):
                         help="make error?")
     parser.add_argument("--error_sampling_train", type=float, default=1,
                         help="make error with dinamic sampling?")
-    parser.add_argument("--error_sampling_test", type=float, default=0.08,
+    parser.add_argument("--error_sampling_test", type=float, default=1,
                         help="make error with dinamic sampling?")
 
     parser.add_argument("--error_ids", type=list, default=[],
@@ -157,9 +161,10 @@ def get_args(parser):
     parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12, 24])
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128, 256])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
+    parser.add_argument("--use_prev_img", type=bool, default=False)
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
-    parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "all", "None"])
+    parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "rrc", "all", "None"])
     parser.add_argument("--txt_aug", type=str, default="sentence_shuffling", choices=["sentence_shuffling","None"])
     
 
@@ -327,14 +332,16 @@ def freeze_weight(model, args, i_epoch):
 
 
 def model_forward(model, args, criterion, batch):
-    findings, impression, img, tgt = batch
+    findings, impression, img, tgt, prev_img = batch
     device = args.device
 
     findings = (findings[0].to(device), findings[1].to(device), findings[2].to(device))
     impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
+    
     img = img.to(device)
+    prev_img = prev_img.to(device) if args.use_prev_img else None
 
-    out = model(findings, impression, img)
+    out = model(findings, impression, (img, prev_img))
 
     tgt = tgt.to(device)
     loss = criterion(out, tgt)

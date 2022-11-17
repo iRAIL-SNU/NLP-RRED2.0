@@ -3,7 +3,7 @@ CoCa-pytorch/
 hi-ml/
 source/downstream/training_output*/
 inference_result/
-
+Medical_X-VL/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

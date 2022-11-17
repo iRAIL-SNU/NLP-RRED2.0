@@ -18,7 +18,7 @@ from torch.utils.data import DistributedSampler
 from health_multimodal.image.data.transforms import create_chest_xray_transform_for_inference
 from health_multimodal.text.model import CXRBertTokenizer
 
-from torchvision.transforms import Compose, RandomAffine, ColorJitter, RandomHorizontalFlip
+from torchvision.transforms import Compose, RandomAffine, ColorJitter, RandomHorizontalFlip, RandomResizedCrop
 from model import *
 
 def get_model(args):
@@ -30,6 +30,8 @@ def get_model(args):
         return VLModelClf(args)
     elif args.multimodal_model_type == "coca":
         return CXRCoCa(args)
+    elif args.multimodal_model_type == "xvl":
+        return XVL(args)
     else:
         raise(ValueError("Unknown model type: %s" % args.model_type))
 
@@ -57,15 +59,19 @@ def get_transforms(args):
 def get_image_augmentations(aug_method):
     color_jitter = ColorJitter(brightness=.2, contrast=.2, saturation=.2, hue=.2 )
     horizontal_flip = RandomHorizontalFlip(p=0.5)
-    random_affine = RandomAffine(degrees=30,translate=(0.1,0.1),scale=(0.8, 1.2))
+    random_affine = RandomAffine(degrees=10)
+    random_resized_crop = RandomResizedCrop(size=512, scale=(0.5,1.0))
 
     augmentations = []
+    if aug_method in ["all","rrc"]:
+        augmentations.append(random_resized_crop)
     if aug_method in ["all","colur"]:
         augmentations.append(color_jitter)
     if aug_method in ["all","hflip"]:
         augmentations.append(horizontal_flip)
     if aug_method in ["all","affine"]:
         augmentations.append(random_affine)
+        
    
     return Compose(augmentations)
 
@@ -151,6 +157,7 @@ def collate_fn(batch, args):
         return text_tensor, segment_tensor, mask_tensor
         
     img_tensor = torch.stack([row[4] for row in batch])
+    prev_img_tensor = torch.stack([row[6] for row in batch]) if args.use_prev_img else None
 
     if args.task_type == "multilabel":
         # Multilabel case
@@ -165,7 +172,7 @@ def collate_fn(batch, args):
     findings_tensors = get_text_tensors(batch, n_row=0)
     impression_tensors = get_text_tensors(batch, n_row=2)
 
-    return findings_tensors, impression_tensors, img_tensor, tgt_tensor
+    return findings_tensors, impression_tensors, img_tensor, tgt_tensor, prev_img_tensor
 
 
 def get_tokenizer(args):
