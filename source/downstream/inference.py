@@ -44,15 +44,16 @@ def model_eval(args, data):
 
             findings = (findings[0].to(device), findings[1].to(device), findings[2].to(device))
             impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
-            img = img.to(device)
-            prev_img = prev_img.to(device) if args.use_prev_img else None
-
-            
+            img = img.to(device)        
 
             total_out = torch.zeros([args.batch_sz,2]).to(device)
             single_outs = []
 
-            out = model(findings, impression, (img, prev_img))
+            if args.use_prev_img:
+                prev_img = prev_img.to(device)
+                out = model(findings, impression, (img, prev_img))
+            else:
+                out = model(findings, impression, img)
             
             tgt = tgt.to(device)
             tgt = tgt.cpu().detach().numpy()
@@ -164,12 +165,20 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-11-07/v0.3unif_1.0_Flamingo/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-02/v0.3_10.0_Flamingo/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-16/v0.3_1.00_flamingo_rrc/model_best.pt'
-    'workspace/source/downstream/training_output2022-11-16/v0.3_1.00_flamingo_rrc/checkpoint.pt'
+    # 'workspace/source/downstream/training_output2022-11-16/v0.3_1.00_flamingo_rrc/checkpoint.pt'
+    # 'workspace/source/downstream/training_output2022-11-13/v0.3_1.00_prev_flamingo/checkpoint.pt'
+    # 'workspace/source/downstream/training_output2022-11-14/v0.3_1.00_prev_flamingo_perceiver4_clstok /checkpoint.pt'
+    # 'workspace/source/downstream/training_output2022-11-15/v0.3_1.00_prev_flamingo_perceiver4_dim128_head12 /checkpoint.pt'
+    # "workspace/source/downstream/training_output2022-11-17/v0.3_1.00_flamingo_rrc_testsampling1.00/checkpoint.pt"
+    "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
 
     # 'workspace/source/downstream/training_output2022-11-09/v0.3_1.00_coca/model_best.pt' #depth 1
+    # 'workspace/source/downstream/training_output2022-11-09/v0.3_1.00_coca/checkpoint.pt' #depth 1
     # 'workspace/source/downstream/training_output2022-11-10/v0.3_1.00_coca_depth12/model_best.pt' #depth 12
+    # 'workspace/source/downstream/training_output2022-11-10/v0.3_1.00_coca_depth12/checkpoint.pt' #depth 12
     )
     parser.add_argument("--resultdir", type=str, default='workspace/inference_result')
 
@@ -231,7 +240,7 @@ def get_args(parser):
     parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12])
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
-    parser.add_argument("--use_prev_img", type=bool, default=False)
+    parser.add_argument("--use_prev_img", type=bool, default=True)
 
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])

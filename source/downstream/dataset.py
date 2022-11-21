@@ -143,6 +143,7 @@ class JsonlDatasetSNUH(Dataset):
 
         self.max_seq_len = args.max_seq_len
 
+
         self.transforms = transforms
         self.augmentations = augmentations
 
@@ -153,14 +154,25 @@ class JsonlDatasetSNUH(Dataset):
             return len(self.data)
 
 
-    def __getitem__(self, index):
+    def __getitem__(self, index):        
+        max_seq_len_findings = self.max_seq_len
+        max_seq_len_prev_findings = 0
+
         # sentence shuffling within each section
         if self.set_type=='train' and self.args.txt_aug =='sentence_shuffling':
             self.data[index]["Findings"] = shuffle_sentence(self.data[index]["Findings"])
-            self.data[index]["Impression"] = shuffle_sentence(self.data[index]["Impression"])
+            # self.data[index]["Impression"] = shuffle_sentence(self.data[index]["Impression"])
+            if self.args.use_prev_txt and self.data[index]["prev_Findings"] is not None:
+                self.data[index]["prev_Findings"] = shuffle_sentence(self.data[index]["prev_Findings"])
+                # self.data[index]["Impression"] = shuffle_sentence(self.data[index]["Impression"])
+                
+                if len(self.data[index]["Findings"]) + len(self.data[index]["prev_Findings"]) > self.max_seq_len-1:
+                    max_seq_len_findings = int(self.max_seq_len * 2/3)
+                    max_seq_len_prev_findings = int(self.max_seq_len * 1/3)
+
             
         sentence_findings = (
-            self.text_start_token + self.tokenizer(self.image_token+str(self.data[index]["Findings"]))[: (self.max_seq_len-1)]
+            self.text_start_token + self.tokenizer(self.image_token+str(self.data[index]["Findings"]))[: (max_seq_len_findings-1)]
             )
         segment_findings = torch.zeros(len(sentence_findings))
         sentence_findings = torch.LongTensor(
@@ -169,17 +181,30 @@ class JsonlDatasetSNUH(Dataset):
                 for w in sentence_findings
             ]
             )
+        if self.args.use_prev_txt:
+            sentence_prev_findings = (
+                [self.sep_tok] + self.tokenizer(self.image_token+str(self.data[index]["prev_Findings"]))[: (max_seq_len_prev_findings-1)]
+                )
+            segment_prev_findings = torch.ones(len(sentence_prev_findings))
+            sentence_prev_findings = torch.LongTensor(
+                [
+                    self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi[self.unk_tok]
+                    for w in sentence_prev_findings
+                ]
+                )
 
-        sentence_impression = (
-            self.text_start_token + self.tokenizer(str(self.data[index]["Impression"]))[: (self.max_seq_len - 1)]
-            )
-        segment_impression = torch.zeros(len(sentence_impression))
-        sentence_impression = torch.LongTensor(
-            [
-                self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi[self.unk_tok]
-                for w in sentence_impression
-            ]
-            )
+        # sentence_impression = (
+        #     self.text_start_token + self.tokenizer(str(self.data[index]["Impression"]))[: (self.max_seq_len - 1)]
+        #     )
+        # segment_impression = torch.zeros(len(sentence_impression))
+        # sentence_impression = torch.LongTensor(
+        #     [
+        #         self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi[self.unk_tok]
+        #         for w in sentence_impression
+        #     ]
+        #     )
+        sentence_impression, segment_impression = None, None
+        
 
         if self.args.task_type == "multilabel":
             label = torch.zeros(self.n_classes)
@@ -203,7 +228,7 @@ class JsonlDatasetSNUH(Dataset):
         prev_image = self.get_image_with_transform(prev_image_path) if self.args.use_prev_img else None
         # prev_findings, prev_impression
         
-        return sentence_findings, segment_findings, sentence_impression, segment_impression, image, label, prev_image
+        return sentence_findings, segment_findings, sentence_impression, segment_impression, image, label, prev_image, sentence_prev_findings, segment_prev_findings
 
 
     def sample_error(self):
