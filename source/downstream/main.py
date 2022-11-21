@@ -40,8 +40,8 @@ from datetime import datetime
 def get_args(parser):
 
     parser.add_argument("--seed", type=int, default=1125)
-    parser.add_argument("--batch_sz", type=int, default=32)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--batch_sz", type=int, default=8)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
     parser.add_argument("--max_epochs", type=int, default=20)
 
     parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert'])
@@ -162,6 +162,7 @@ def get_args(parser):
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128, 256])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
     parser.add_argument("--use_prev_img", type=bool, default=False)
+    parser.add_argument("--use_prev_txt", type=bool, default=True)
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "rrc", "all", "None"])
@@ -332,16 +333,18 @@ def freeze_weight(model, args, i_epoch):
 
 
 def model_forward(model, args, criterion, batch):
-    findings, impression, img, tgt, prev_img = batch
+    findings, impression, img, tgt, prev_img, prev_findings = batch
     device = args.device
 
     findings = (findings[0].to(device), findings[1].to(device), findings[2].to(device))
-    impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
+    prev_findings = (prev_findings[0].to(device), prev_findings[1].to(device), prev_findings[2].to(device)) if args.use_prev_txt else None
+    # impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
+    impression = None
     
     img = img.to(device)
     prev_img = prev_img.to(device) if args.use_prev_img else None
 
-    out = model(findings, impression, (img, prev_img))
+    out = model((findings, prev_findings), impression, (img, prev_img))
 
     tgt = tgt.to(device)
     loss = criterion(out, tgt)

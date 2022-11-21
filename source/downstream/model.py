@@ -241,10 +241,28 @@ class CXRFlamingo(nn.Module):
             nn.Linear(self.dim*2, args.n_classes, bias=False)
         )
 
-    def forward(self, findings, impression, image):
-        txt, _, attention_mask = findings
+    def forward(self, findingss, impression, images):
+        findings, prev_findings = findingss
 
-        image, prev_image = image
+        txt, segment, attention_mask = findings
+        findings_embed = self.text_embdding(txt, token_type_ids=segment)
+
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        if self.args.use_prev_txt:
+            prev_txt, prev_segment, prev_attention_mask = prev_findings
+            prev_findings_embed = self.text_embdding(prev_txt, token_type_ids=prev_segment)
+
+            prev_extended_attention_mask = prev_attention_mask.unsqueeze(1).unsqueeze(2)
+            prev_extended_attention_mask = (1.0 - prev_extended_attention_mask) * -10000.0
+
+            findings_embed = torch.cat((findings_embed, prev_findings_embed),dim = 1)
+            extended_attention_mask = torch.cat((extended_attention_mask, prev_extended_attention_mask), dim=3)
+
+        # impression_embed = self.text_embdding(txt)
+
+        image, prev_image = images
         img = self.image_model(image).patch_embedding  # Bxn_channelxWxH --> Bx2048x15x15
         img = img.resize(img.shape[0],img.shape[2]*img.shape[3],self.args.img_hidden_sz)# Bx2048x15x15 --> Bx15x15x2048
 
@@ -268,11 +286,6 @@ class CXRFlamingo(nn.Module):
                     
         img = self.perceiver_resampler(img) 
 
-        findings_embed = self.text_embdding(txt)
-        # impression_embed = self.text_embdding(txt)
-
-        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
         if self.args.cross_attn_order == 'cross->single':
             for xattn_layer, lm_layer in self.encoder_layers:

@@ -59,12 +59,12 @@ def get_transforms(args):
 def get_image_augmentations(aug_method):
     color_jitter = ColorJitter(brightness=.2, contrast=.2, saturation=.2, hue=.2 )
     horizontal_flip = RandomHorizontalFlip(p=0.5)
-    random_affine = RandomAffine(degrees=10)
-    random_resized_crop = RandomResizedCrop(size=512, scale=(0.5,1.0))
+    random_affine = RandomAffine(degrees=30, translate=(0.1,0.1), scale=(0.8,1.2))
+    # random_resized_crop = RandomResizedCrop(size=512, scale=(0.5,1.0))
 
     augmentations = []
-    if aug_method in ["all","rrc"]:
-        augmentations.append(random_resized_crop)
+    # if aug_method in ["all","rrc"]:
+    #     augmentations.append(random_resized_crop)
     if aug_method in ["all","colur"]:
         augmentations.append(color_jitter)
     if aug_method in ["all","hflip"]:
@@ -147,7 +147,6 @@ def collate_fn(batch, args):
         mask_tensor = torch.zeros(bsz, max_seq_len).long()
         text_tensor = torch.zeros(bsz, max_seq_len).long()
         segment_tensor = torch.zeros(bsz, max_seq_len).long()
-
         for i, (row, length) in enumerate(zip(batch, lens)):
             tokens, segment = row[n_row:n_row+2]
             text_tensor[i, :length] = tokens
@@ -170,9 +169,12 @@ def collate_fn(batch, args):
         tgt_tensor = torch.cat([row[5] for row in batch]).long()
 
     findings_tensors = get_text_tensors(batch, n_row=0)
-    impression_tensors = get_text_tensors(batch, n_row=2)
+    prev_findings_tensors = get_text_tensors(batch, n_row=7)
+    impression_tensors = None # get_text_tensors(batch, n_row=2)
+    
+    
 
-    return findings_tensors, impression_tensors, img_tensor, tgt_tensor, prev_img_tensor
+    return findings_tensors, impression_tensors, img_tensor, tgt_tensor, prev_img_tensor, prev_findings_tensors
 
 
 def get_tokenizer(args):
