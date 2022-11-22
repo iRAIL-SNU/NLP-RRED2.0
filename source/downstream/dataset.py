@@ -9,6 +9,8 @@ from torch.utils.data import Dataset
 
 import sys
 sys.path.insert(1, 'workspace/source/utils')
+# sys.path.insert(1, 'NLP-RRED2.0/source/utils')
+
 from utils import shuffle_sentence, numpy_seed, make_image_path
 
 import random
