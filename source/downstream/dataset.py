@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import Dataset
 
 import sys
-sys.path.insert(1, '/home/workspace/source/utils')
+sys.path.insert(1, 'workspace/source/utils')
 from utils import shuffle_sentence, numpy_seed, make_image_path
 
 import random
@@ -181,6 +181,8 @@ class JsonlDatasetSNUH(Dataset):
                 for w in sentence_findings
             ]
             )
+        sentence_prev_findings, segment_prev_findings = None, None
+        
         if self.args.use_prev_txt:
             sentence_prev_findings = (
                 [self.sep_tok] + self.tokenizer(self.image_token+str(self.data[index]["prev_Findings"]))[: (max_seq_len_prev_findings-1)]
