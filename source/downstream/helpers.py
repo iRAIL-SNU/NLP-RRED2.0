@@ -169,7 +169,7 @@ def collate_fn(batch, args):
         tgt_tensor = torch.cat([row[5] for row in batch]).long()
 
     findings_tensors = get_text_tensors(batch, n_row=0)
-    prev_findings_tensors = get_text_tensors(batch, n_row=7)
+    prev_findings_tensors = get_text_tensors(batch, n_row=7) if args.use_prev_txt else None
     impression_tensors = None # get_text_tensors(batch, n_row=2)
     
     

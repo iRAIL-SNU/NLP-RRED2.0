@@ -19,7 +19,7 @@ import torch.optim as optim
 from helpers import get_data_loaders, get_dataset, get_model
 
 import sys
-sys.path.insert(1, '/home/workspace/source/utils')
+sys.path.insert(1, 'workspace/source/utils')
 from utils import *
 
 from logger import create_logger
@@ -332,7 +332,7 @@ def freeze_weight(model, args, i_epoch):
 
 
 
-def model_forward(model, args, criterion, batch):
+def model_forward(model, args, criterion, batch, compute_loss=False):
     findings, impression, img, tgt, prev_img, prev_findings = batch
     device = args.device
 
@@ -347,7 +347,7 @@ def model_forward(model, args, criterion, batch):
     out = model((findings, prev_findings), impression, (img, prev_img))
 
     tgt = tgt.to(device)
-    loss = criterion(out, tgt)
+    loss = criterion(out, tgt) if compute_loss else None
     return loss, out, tgt
 
 def train(args):

@@ -25,37 +25,16 @@ import shutil
 import openpyxl
 import pytz
 from datetime import datetime
+from main import model_forward
 
 
 def model_eval(args, data):
     device = args.device
     with torch.no_grad():
         preds, tgts, total_outs = [], [], []
-        step = 0
         for batch in tqdm(data):
-            findings, impression, img, tgt, prev_img = batch
-            step += 1
-
-            # #####################
-            # if step > 100:
-            #     print('step 100 중지 '*10)
-            #     break
-            # #####################
-
-            findings = (findings[0].to(device), findings[1].to(device), findings[2].to(device))
-            impression = (impression[0].to(device), impression[1].to(device), impression[2].to(device))
-            img = img.to(device)        
-
-            total_out = torch.zeros([args.batch_sz,2]).to(device)
-            single_outs = []
-
-            if args.use_prev_img:
-                prev_img = prev_img.to(device)
-                out = model(findings, impression, (img, prev_img))
-            else:
-                out = model(findings, impression, img)
+            _, out, tgt = model_forward(model, args, criterion=None, batch=batch, compute_loss=False)
             
-            tgt = tgt.to(device)
             tgt = tgt.cpu().detach().numpy()
 
             pred = torch.nn.functional.softmax(out, dim=1).argmax(dim=1).cpu().detach().numpy()
@@ -170,7 +149,9 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-11-14/v0.3_1.00_prev_flamingo_perceiver4_clstok /checkpoint.pt'
     # 'workspace/source/downstream/training_output2022-11-15/v0.3_1.00_prev_flamingo_perceiver4_dim128_head12 /checkpoint.pt'
     # "workspace/source/downstream/training_output2022-11-17/v0.3_1.00_flamingo_rrc_testsampling1.00/checkpoint.pt"
-    "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
+    # "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
+    # "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
+    "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/checkpoint.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -235,12 +216,13 @@ def get_args(parser):
     parser.add_argument("--multimodal_depth", type=int, default=12, choices=[1,2,4,8,12])
     parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
     parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])
-    parser.add_argument("--perceiver_depth", type=int, default=1, choices=[1,2,3,4])
-    parser.add_argument("--perceiver_dim_head", type=int, default=64, choices=[64, 128])
-    parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12])
-    parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
+    parser.add_argument("--perceiver_depth", type=int, default=4, choices=[1,2,3,4])
+    parser.add_argument("--perceiver_dim_head", type=int, default=128, choices=[64, 128])
+    parser.add_argument("--perceiver_num_head", type=int, default=12, choices=[8, 12])
+    parser.add_argument("--num_img_token", type=int, default=128, choices=[64, 128])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
     parser.add_argument("--use_prev_img", type=bool, default=True)
+    parser.add_argument("--use_prev_txt", type=bool, default=False)
 
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
