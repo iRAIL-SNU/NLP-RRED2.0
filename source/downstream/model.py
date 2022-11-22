@@ -6,6 +6,8 @@ from health_multimodal.image.model import get_biovil_resnet
 
 import sys
 sys.path.insert(1, 'workspace/source/model/report_coca')
+# sys.path.insert(1, 'NLP-RRED2.0/source/model/report_coca')
+
 from report_coca import CrossAttention, LayerNorm
 from flamingo_pytorch import PerceiverResampler, GatedCrossAttentionBlock
 from flamingo_pytorch.flamingo_palm import *
