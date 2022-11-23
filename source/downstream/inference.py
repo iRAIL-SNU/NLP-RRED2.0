@@ -11,11 +11,8 @@ from tqdm import tqdm
 import torch.nn as nn
 
 from helpers import get_data_loaders, get_model, get_dataset
-import sys
-sys.path.insert(1, '/home/workspace/source/utils')
-from utils import *
-
-from logger import create_logger
+from utils.utils import *
+from utils.logger import create_logger
 
 import torch
 from matplotlib import pyplot as plt
@@ -160,7 +157,7 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-11-10/v0.3_1.00_coca_depth12/model_best.pt' #depth 12
     # 'workspace/source/downstream/training_output2022-11-10/v0.3_1.00_coca_depth12/checkpoint.pt' #depth 12
     )
-    parser.add_argument("--resultdir", type=str, default='workspace/inference_result')
+    parser.add_argument("--resultdir", type=str, default='inference_result')
 
 
 ##########################
@@ -379,9 +376,7 @@ if __name__=='__main__':
     output_path = os.path.join(args.resultdir, str(now)+'_'+model_setting_name)
     output_img_path = os.path.join(output_path,'images')
     if not os.path.exists(output_path):
-        os.mkdir(output_path)
-        os.chmod(output_path, 0o777)
-        os.mkdir(output_img_path)
+        os.makedirs(output_img_path)
         os.chmod(output_img_path, 0o777)
     print('output_path: ', output_path)
 
@@ -394,14 +389,14 @@ if __name__=='__main__':
 
 
 
-    data = pd.read_csv('/home/workspace/Multi-modality-Self-supervision/data/mimic-cxr/mimic_test_with_human_error.csv')
+    # data = pd.read_csv('/home/workspace/Multi-modality-Self-supervision/data/mimic-cxr/mimic_test_with_human_error.csv')
 
-    error_types = ['1-A', '1-B', '1-C', '1-D', '2-A', '2-B', '3']
-    error_detection_rates = {}
-    for type in error_types:
-        total = sum(data.iloc[fn_idx]['human_error_type']==type) + sum(data.iloc[tp_idx]['human_error_type']==type)
-        rate = sum(data.iloc[tp_idx]['human_error_type']==type) / total
+    # error_types = ['1-A', '1-B', '1-C', '1-D', '2-A', '2-B', '3']
+    # error_detection_rates = {}
+    # for type in error_types:
+    #     total = sum(data.iloc[fn_idx]['human_error_type']==type) + sum(data.iloc[tp_idx]['human_error_type']==type)
+    #     rate = sum(data.iloc[tp_idx]['human_error_type']==type) / total
 
-        error_detection_rates[type] = rate
-    print(error_detection_rates)
-    print('end')
+    #     error_detection_rates[type] = rate
+    # print(error_detection_rates)
+    # print('end')

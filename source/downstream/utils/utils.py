@@ -9,8 +9,6 @@ from nltk import tokenize
 from random import shuffle
 import wandb
 
-
-import io
 import time
 from collections import defaultdict, deque
 from datetime import datetime
