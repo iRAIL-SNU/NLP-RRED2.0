@@ -37,12 +37,21 @@ from datetime import datetime
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # ####
-
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+    
 def get_args(parser):
 
     parser.add_argument("--seed", type=int, default=1125)
-    parser.add_argument("--batch_sz", type=int, default=8)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    parser.add_argument("--batch_sz", type=int, default=32)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--max_epochs", type=int, default=20)
 
     parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert'])
@@ -50,7 +59,7 @@ def get_args(parser):
     parser.add_argument("--n_classes", type=int, default=2)
 
     parser.add_argument("--device", type=str, default='cuda')
-    parser.add_argument("--use_ddp", type=bool, default=False)
+    parser.add_argument("--use_ddp", type=str2bool, default=False)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--n_workers", type=int, default=32)
     parser.add_argument("--patience", type=int, default=5)
@@ -70,7 +79,7 @@ def get_args(parser):
     # MKP CXR-BERT
     # parser.add_argument("--loaddir", type=str, default="/home/workspace/Multi-modality-Self-supervision/pretrain_output/2022-07-08 14:35:32.870226/49") # knowledg4_pretrained 63epoch
 
-    parser.add_argument("--openi", type=bool, default=False)
+    parser.add_argument("--openi", type=str2bool, default=False)
 
 
 ##########################
@@ -120,9 +129,9 @@ def get_args(parser):
     parser.add_argument("--data_dir_img", type=str, default='data/mimic-cxr-jpg/2.0.0/files',
                         help="dset path for training")
 
-    parser.add_argument("--test_with_bootstrap", type=bool, default=False,
+    parser.add_argument("--test_with_bootstrap", type=str2bool, default=False,
                         help="test with bootstrap")
-    parser.add_argument("--make_error", type=bool, default=True,
+    parser.add_argument("--make_error", type=str2bool, default=True,
                         help="make error?")
     parser.add_argument("--error_sampling_train", type=float, default=1,
                         help="make error with dinamic sampling?")
@@ -162,8 +171,8 @@ def get_args(parser):
     parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12, 24])
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128, 256])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
-    parser.add_argument("--use_prev_img", type=bool, default=False)
-    parser.add_argument("--use_prev_txt", type=bool, default=True)
+    parser.add_argument("--use_prev_img", type=str2bool, default=True)
+    parser.add_argument("--use_prev_txt", type=str2bool, default=False)
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "rrc", "all", "None"])
@@ -175,8 +184,8 @@ def get_args(parser):
 
     parser.add_argument("--freeze_img", type=int, default=0)
     parser.add_argument("--freeze_txt", type=int, default=0)
-    parser.add_argument("--freeze_img_all", type=str, default=True)
-    parser.add_argument("--freeze_txt_all", type=str, default=True)
+    parser.add_argument("--freeze_img_all", type=str2bool, default=False)
+    parser.add_argument("--freeze_txt_all", type=str2bool, default=True)
 
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -189,7 +198,7 @@ def get_args(parser):
     parser.add_argument("--warmup", type=float, default=0.1)
     parser.add_argument("--weight_classes", type=int, default=1)
 
-    parser.add_argument("--inference", type=bool, default=False)
+    parser.add_argument("--inference", type=str2bool, default=False)
     parser.add_argument("--inference_method", type=str, default=None, choices=['batch','single', None])
     parser.add_argument("--test_dset_name", type=str, default='test_error_0509-k1000.jsonl',
                             help="valid dset for SNUH")
@@ -333,7 +342,7 @@ def freeze_weight(model, args, i_epoch):
 
 
 
-def model_forward(model, args, criterion, batch, compute_loss=False):
+def model_forward(model, args, criterion, batch, compute_loss=True):
     findings, impression, img, tgt, prev_img, prev_findings = batch
     device = args.device
 
