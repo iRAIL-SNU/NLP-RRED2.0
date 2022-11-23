@@ -2,9 +2,6 @@ import os
 from random import choices
 import pandas as pd
 
-from transformers.utils.dummy_tf_objects import WarmUp
-from transformers import AutoTokenizer, AutoModel
-
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 # os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
 import csv
@@ -17,13 +14,9 @@ import torch.optim as optim
 # from pytorch_pretrained_bert import BertAdam
 
 from helpers import get_data_loaders, get_dataset, get_model
+from utils.utils import *
 
-import sys
-sys.path.insert(1, 'workspace/source/utils')
-# sys.path.insert(1, 'NLP-RRED2.0/source/utils')
-from utils import *
-
-from logger import create_logger
+from utils.logger import create_logger
 import wandb
 
 import torch
@@ -66,9 +59,9 @@ def get_args(parser):
 
     now = datetime.now()
     now = now.strftime('%Y-%m-%d')
-    output_path = "workspace/source/downstream/training_output" + str(now)
+    output_path = "training_output/" + str(now)
     if not os.path.exists(output_path):
-        os.mkdir(output_path)
+        os.makedirs(output_path)
         os.chmod(output_path, 0o777)
 
     parser.add_argument("--savedir", type=str, default=output_path)
