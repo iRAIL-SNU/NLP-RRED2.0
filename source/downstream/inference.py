@@ -150,8 +150,7 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-11-15/v0.3_1.00_prev_flamingo_perceiver4_dim128_head12 /checkpoint.pt'
     # "workspace/source/downstream/training_output2022-11-17/v0.3_1.00_flamingo_rrc_testsampling1.00/checkpoint.pt"
     # "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
-    # "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
-    "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/checkpoint.pt"
+    "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -180,15 +179,15 @@ def get_args(parser):
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
                     help="mimic-cxr or indiana")
-    parser.add_argument("--openi", type=bool, default=False)
+    parser.add_argument("--openi", type=str2bool, default=False)
     parser.add_argument("--data_path", type=str, default='data/mimic-cxr-jpg/2.0.0/rred',
                         help="dset path for training")
     parser.add_argument("--data_dir_img", type=str, default='data/mimic-cxr-jpg/2.0.0/files',
                         help="dset path for training")
 
-    parser.add_argument("--test_with_bootstrap", type=bool, default=False,
+    parser.add_argument("--test_with_bootstrap", type=str2bool, default=False,
                         help="test with bootstrap")
-    parser.add_argument("--make_error", type=bool, default=True,
+    parser.add_argument("--make_error", type=str2bool, default=True,
                         help="make error?")
     parser.add_argument("--error_sampling_test", type=int, default=1,
                         help="make error with dinamic sampling?")
@@ -221,8 +220,8 @@ def get_args(parser):
     parser.add_argument("--perceiver_num_head", type=int, default=12, choices=[8, 12])
     parser.add_argument("--num_img_token", type=int, default=128, choices=[64, 128])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
-    parser.add_argument("--use_prev_img", type=bool, default=True)
-    parser.add_argument("--use_prev_txt", type=bool, default=False)
+    parser.add_argument("--use_prev_img", type=str2bool, default=True)
+    parser.add_argument("--use_prev_txt", type=str2bool, default=False)
 
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
@@ -230,7 +229,7 @@ def get_args(parser):
 
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--max_seq_len", type=int, default=512)
-    parser.add_argument("--inference", type=bool, default=True)
+    parser.add_argument("--inference", type=str2bool, default=True)
     parser.add_argument("--inference_method", type=str, default='batch', choices=['batch','single', None])
 
 

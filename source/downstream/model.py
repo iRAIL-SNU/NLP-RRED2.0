@@ -196,8 +196,13 @@ class CXRFlamingo(nn.Module):
 
         language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
         self.image_model = get_biovil_resnet()
-        freeze_model_and_make_eval_(language_model)
-        freeze_model_and_make_eval_(self.image_model)
+                
+        if self.args.freeze_txt_all:
+            freeze_model_and_make_eval_(language_model)
+            print("Language model is freezed")
+        if self.args.freeze_img_all:
+            freeze_model_and_make_eval_(self.image_model)
+            print("Image model is freezed")
 
         self.dim = args.hidden_sz # 768
         self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=args.img_hidden_sz, dim_head=64, heads=8, norm_context=True)
