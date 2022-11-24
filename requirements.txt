@@ -81,7 +81,7 @@ kiwisolver==1.4.4
 libarchive-c==2.9
 locket==1.0.0
 markdown-it-py==1.1.0
-MarkupSafe==2.0.1
+MarkupSafe
 matplotlib==3.5.2
 matplotlib-inline==0.1.2
 mccabe==0.6.1
@@ -96,7 +96,7 @@ mypy==0.931
 mypy-extensions==0.4.3
 myst-parser==0.15.2
 nbclient==0.6.6
-nbconvert==6.5.0
+nbconvert
 nbformat==5.4.0
 nest-asyncio==1.5.5
 networkx==2.8.5
@@ -197,7 +197,7 @@ tomli==2.0.1
 toolz==0.12.0
 torch==1.9.0
 torchaudio
-torchelastic==0.2.2
+torchelastic
 torchvision
 tornado==6.1
 tqdm==4.64.0
@@ -208,8 +208,8 @@ typing_extensions==4.3.0
 update==0.0.1
 urllib3==1.26.11
 varname==0.8.3
-vit-pytorch==0.35.8
-wandb==0.13.3
+vit-pytorch
+wandb
 wcwidth==0.2.5
 webencodings==0.5.1
 Werkzeug==2.2.2
