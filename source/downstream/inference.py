@@ -26,7 +26,6 @@ from main import model_forward
 
 
 def model_eval(args, data):
-    device = args.device
     with torch.no_grad():
         preds, tgts, total_outs = [], [], []
         for batch in tqdm(data):
@@ -147,7 +146,8 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-11-15/v0.3_1.00_prev_flamingo_perceiver4_dim128_head12 /checkpoint.pt'
     # "workspace/source/downstream/training_output2022-11-17/v0.3_1.00_flamingo_rrc_testsampling1.00/checkpoint.pt"
     # "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
-    "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
+    # "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
+    "workspace/source/downstream/training_output2022-11-23/v0.3_1.00_prev_flamingo_unfreezeimg /checkpoint.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -212,10 +212,10 @@ def get_args(parser):
     parser.add_argument("--multimodal_depth", type=int, default=12, choices=[1,2,4,8,12])
     parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
     parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])
-    parser.add_argument("--perceiver_depth", type=int, default=4, choices=[1,2,3,4])
-    parser.add_argument("--perceiver_dim_head", type=int, default=128, choices=[64, 128])
-    parser.add_argument("--perceiver_num_head", type=int, default=12, choices=[8, 12])
-    parser.add_argument("--num_img_token", type=int, default=128, choices=[64, 128])
+    parser.add_argument("--perceiver_depth", type=int, default=1, choices=[1,2,3,4])
+    parser.add_argument("--perceiver_dim_head", type=int, default=64, choices=[64, 128])
+    parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12])
+    parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
     parser.add_argument("--use_prev_img", type=str2bool, default=True)
     parser.add_argument("--use_prev_txt", type=str2bool, default=False)

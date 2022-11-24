@@ -30,15 +30,6 @@ from datetime import datetime
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # ####
-def str2bool(v):
-    if isinstance(v, bool):
-       return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
     
 def get_args(parser):
 
@@ -422,7 +413,8 @@ def train(args):
 
         if args.multimodal_model_type == "flamingo":
             log_tanh_gating(model,args)
-
+            if not args.freeze_img_all:
+                model.unfreeze_image_model()
         if args.multimodal_model_type not in ["flamingo"]:
             freeze_weight(model, args, i_epoch) 
 

@@ -193,10 +193,10 @@ class CXRFlamingo(nn.Module):
         language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
         self.image_model = get_biovil_resnet()
                 
-        if self.args.freeze_txt_all:
+        if self.args.inference or self.args.freeze_txt_all:
             freeze_model_and_make_eval_(language_model)
             print("Language model is freezed")
-        if self.args.freeze_img_all:
+        if self.args.inference or self.args.freeze_img_all:
             freeze_model_and_make_eval_(self.image_model)
             print("Image model is freezed")
 
@@ -307,34 +307,12 @@ class CXRFlamingo(nn.Module):
         return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1)) #### 이거 findings_embed[:,0,:] 으로 해보자
         # return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,0,:]), 1)) 
 
-
-    # def forward(self, findings, impression, image):
-    #     txt, _, attention_mask = findings
-
-    #     img = self.image_model(image).patch_embedding  
-    #     img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
-
-    #     queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
-    #     img = self.img_attn_pool(queries, img)
-    #     img = self.img_attn_pool_norm(img)
-
-    #     img = self.perceiver_resampler(img)
-
-    #     findings_embed = self.text_embdding(txt)
-    #     # impression_embed = self.text_embdding(txt)
-
-    #     extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-    #     extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-
-    #     for xattn_layer, lm_layer in self.encoder_layers:
-    #         if exists(xattn_layer) and exists(img):
-    #             findings_embed = xattn_layer(findings_embed, img)
-
-    #         findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
-
-    #     # return self.to_logits(findings_embed[:,0,:])
-    #     return self.to_logits(findings_embed[:,[0,2],:].reshape(findings_embed.shape[0],-1))
-
+    def unfreeze_image_model(self):
+        self.image_model.train()
+        unfreeze_all_layers_(self.image_model)
+        print("Image model is unfreezed")
+            
+            
 class CXRFlamingoForErrorDetection(nn.Module):
     def __init__(self,args):
         super(CXRFlamingoForErrorDetection,self).__init__()
