@@ -156,7 +156,7 @@ def get_args(parser):
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128, 256])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
     parser.add_argument("--use_prev_img", type=str2bool, default=True)
-    parser.add_argument("--use_prev_txt", type=str2bool, default=False)
+    parser.add_argument("--use_prev_txt", type=str2bool, default=True)
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "rrc", "all", "None"])
@@ -168,7 +168,7 @@ def get_args(parser):
 
     parser.add_argument("--freeze_img", type=int, default=0)
     parser.add_argument("--freeze_txt", type=int, default=0)
-    parser.add_argument("--freeze_img_all", type=str2bool, default=False)
+    parser.add_argument("--freeze_img_all", type=str2bool, default=True)
     parser.add_argument("--freeze_txt_all", type=str2bool, default=True)
 
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
@@ -372,10 +372,11 @@ def train(args):
     model.to(args.device)
     logger.info("Training..")
 
+    flag_data_parallel = False
     if torch.cuda.device_count() > 1 and args.use_ddp==False and args.device != 'cpu':
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
-
+        flag_data_parallel = True
 
     if os.path.exists(os.path.join(args.loaddir, "pytorch_model.bin")):
         model.load_state_dict(torch.load(args.loaddir + "/pytorch_model.bin"), strict=True)
@@ -414,7 +415,10 @@ def train(args):
         if args.multimodal_model_type == "flamingo":
             log_tanh_gating(model,args)
             if not args.freeze_img_all:
-                model.unfreeze_image_model()
+                if flag_data_parallel:
+                    model.module.unfreeze_image_model()
+                else: 
+                    model.unfreeze_image_model()
         if args.multimodal_model_type not in ["flamingo"]:
             freeze_weight(model, args, i_epoch) 
 
