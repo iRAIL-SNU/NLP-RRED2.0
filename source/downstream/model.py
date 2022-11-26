@@ -226,13 +226,13 @@ class CXRFlamingo(nn.Module):
             for i in range(len(lm_layers)):
                 self.encoder_layers.append(nn.ModuleList([
                     lm_layers[i],
-                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=True) if not (i % args.cross_attn_every) else None
                 ])
             )
         elif self.args.cross_attn_order == 'cross->single':
             for i in range(len(lm_layers)):
                 self.encoder_layers.append(nn.ModuleList([
-                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None,
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=True) if not (i % args.cross_attn_every) else None,
                     lm_layers[i]
                 ])
             )
@@ -262,8 +262,13 @@ class CXRFlamingo(nn.Module):
 
             findings_embed = torch.cat((findings_embed, prev_findings_embed),dim = 1)
             extended_attention_mask = torch.cat((extended_attention_mask, prev_extended_attention_mask), dim=3)
-
+            segment = torch.cat((segment, prev_segment), dim = 1)
         # impression_embed = self.text_embdding(txt)
+
+        media_locations = torch.zeros_like(segment).bool().to(self.args.device)
+        for i, media_location in enumerate(media_locations):
+            media_location[0] = True
+            media_location[segment[i].argmax()] = True
 
         image, prev_image = images
         img = self.image_model(image).patch_embedding  # Bxn_channelxWxH --> Bx2048x15x15
@@ -293,13 +298,13 @@ class CXRFlamingo(nn.Module):
         if self.args.cross_attn_order == 'cross->single':
             for xattn_layer, lm_layer in self.encoder_layers:
                 if exists(xattn_layer) and exists(img):
-                    findings_embed = xattn_layer(findings_embed, img)
+                    findings_embed = xattn_layer(findings_embed, img, media_locations=media_locations)
                 findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
         elif self.args.cross_attn_order == 'single->cross':
             for lm_layer, xattn_layer in self.encoder_layers:
                 findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
                 if exists(xattn_layer) and exists(img):
-                    findings_embed = xattn_layer(findings_embed, img)
+                    findings_embed = xattn_layer(findings_embed, img, media_locations=media_locations)
 
         img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
         img = self.img_attn_pool_norm_last(img)
