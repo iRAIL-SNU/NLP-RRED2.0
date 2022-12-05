@@ -290,10 +290,14 @@ class CXRFlamingo(nn.Module):
             img = rearrange(img, 'b n d -> b 1 n d')
             prev_img = rearrange(prev_img, 'b n d -> b 1 n d')
                     
-            img = torch.cat((img,prev_img), dim=1)
+            if self.args.img_to_each_perceiver:
+                prev_img= self.perceiver_resampler(prev_img) 
+            else:
+                img = torch.cat((img,prev_img), dim=1)
                     
         img = self.perceiver_resampler(img) 
-
+        if self.args.img_to_each_perceiver:
+            img = torch.cat((img,prev_img), dim=1)
 
         if self.args.cross_attn_order == 'cross->single':
             for xattn_layer, lm_layer in self.encoder_layers:

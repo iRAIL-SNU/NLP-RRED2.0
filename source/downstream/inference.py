@@ -148,6 +148,8 @@ def get_args(parser):
     # "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
     # "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
     "workspace/source/downstream/training_output2022-11-23/v0.3_1.00_prev_flamingo_unfreezeimg /checkpoint.pt"
+    # "workspace/source/downstream/training_output2022-11-22/v0.3_1.00_prev_flamingo_unfreezeall/model_best.pt" ## unfreeze_all
+    # "training_output/2022-11-25/v0.3_1.00_prev_all_flamingo/model_best.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -219,6 +221,7 @@ def get_args(parser):
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
     parser.add_argument("--use_prev_img", type=str2bool, default=True)
     parser.add_argument("--use_prev_txt", type=str2bool, default=False)
+    parser.add_argument("--img_to_each_perceiver", type=str2bool, default=False)
 
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])

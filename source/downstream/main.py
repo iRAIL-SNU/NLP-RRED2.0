@@ -157,6 +157,7 @@ def get_args(parser):
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
     parser.add_argument("--use_prev_img", type=str2bool, default=True)
     parser.add_argument("--use_prev_txt", type=str2bool, default=True)
+    parser.add_argument("--img_to_each_perceiver", type=str2bool, default=False)
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
     parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "rrc", "all", "None"])
