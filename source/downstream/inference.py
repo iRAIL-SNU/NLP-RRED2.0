@@ -2,7 +2,7 @@ import os
 import pandas as pd
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import argparse
 from sklearn.metrics import RocCurveDisplay, accuracy_score, confusion_matrix, plot_roc_curve, precision_recall_curve, PrecisionRecallDisplay, average_precision_score, RocCurveDisplay, auc, roc_curve
@@ -43,7 +43,7 @@ def model_eval(args, data):
 
 
 
-def cal_performance(tgts, total_outs, threshold=0.5, resultdir=None):
+def cal_performance(tgts, total_outs, threshold=0.5, resultdir=None, do_print=True):
     preds = []
     preds_prob = []
     for total_out in total_outs:
@@ -64,38 +64,41 @@ def cal_performance(tgts, total_outs, threshold=0.5, resultdir=None):
     # for i, p in enumerate(new_single_preds):
     #     new_single_preds[i] = [l for sl in p for l in sl]
 
-    metrics["acc"] = accuracy_score(tgts, preds)
-    # metrics["single_accs"] = [accuracy_score(tgts, p) for p in new_single_preds]
+
 
     matrix = confusion_matrix(tgts, preds)
-    print(matrix)
+
     # classACC = matrix.diagonal()/matrix.sum(axis=1)
-    precisions, recalls, thresholds = precision_recall_curve(tgts, preds_prob)
-    pr_display = PrecisionRecallDisplay(precisions, recalls).plot()
-    pr_display.plot()
+    # precisions, recalls, thresholds = precision_recall_curve(tgts, preds_prob)
+    # pr_display = PrecisionRecallDisplay(precisions, recalls).plot()
+    # pr_display.plot()
     # plt.savefig(os.path.join(resultdir,'PRCurve_mimic_human.png'), dpi=300)
 
-    plt.cla()
+    # plt.cla()
 
     fpr, tpr, thresholds_roc = roc_curve(tgts, preds_prob)
     # roc_display = RocCurveDisplay(fpr, tpr)
     # plt.savefig(os.path.join(resultdir,'ROC_mimic_human.png'), dpi=300)
 
-    import pickle
+    # import pickle
     # with open('mimic-human_prc_plot.pkl', 'wb') as f:
     #     pickle.dump(pr_display, f)
 
+    metrics["AUPRC"] = average_precision_score(tgts, preds_prob)
+    metrics["AUROC"] = auc(fpr, tpr)
     metrics["ppv(precision)"] = matrix[1,1]/(matrix[0,1]+matrix[1,1])
     metrics["npv"] = matrix[0,0]/(matrix[0,0]+matrix[1,0])
     metrics["sensitivity(recall)"] = matrix[1,1]/(matrix[1,0]+matrix[1,1])
     metrics["specificity"] = matrix[0,0]/(matrix[0,0]+matrix[0,1])
-    metrics["PRAUC"] = average_precision_score(tgts, preds_prob)
-    metrics["AUROC"] = auc(fpr, tpr)
-
-    print('Accuracy:', metrics["acc"])
-    print(metrics)
-    # print('Single Accuracy:', metrics["single_accs"])
-    print('-----------------------------------------------------')
+    metrics["f1_score"] = 2 / ((1/metrics["ppv(precision)"])+(1/metrics["sensitivity(recall)"]))
+    metrics["acc"] = accuracy_score(tgts, preds)
+    # metrics["single_accs"] = [accuracy_score(tgts, p) for p in new_single_preds]
+    if do_print:
+        print(matrix)
+        print('Accuracy:', metrics["acc"])
+        print(metrics)
+        # print('Single Accuracy:', metrics["single_accs"])
+        print('-----------------------------------------------------')
 
     return tgts, preds, metrics, matrix, preds_prob
 
@@ -136,7 +139,7 @@ def get_args(parser):
     # 'workspace/source/downstream/training_output2022-10-10/Mixed_FPI_v0.2_Flamingo_every1_withImg_single->cross/model_best.pt'
     
     # 'workspace/source/downstream/training_output2022-10-27/v0.3_0.08_Flamingo/model_best.pt'
-    # 'workspace/source/downstream/training_output2022-10-28/v0.3_1.00_Flamingo/model_best.pt'
+    # 'workspace/source/downstream/training_output2022-10-28/v0.3_1.00_Flamingo/model_best.pt' 
     # 'workspace/source/downstream/training_output2022-11-07/v0.3unif_1.0_Flamingo/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-02/v0.3_10.0_Flamingo/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-16/v0.3_1.00_flamingo_rrc/model_best.pt'
@@ -147,9 +150,9 @@ def get_args(parser):
     # "workspace/source/downstream/training_output2022-11-17/v0.3_1.00_flamingo_rrc_testsampling1.00/checkpoint.pt"
     # "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
     # "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
-    "workspace/source/downstream/training_output2022-11-23/v0.3_1.00_prev_flamingo_unfreezeimg /checkpoint.pt"
+    "workspace/source/downstream/training_output2022-11-23/v0.3_1.00_prev_flamingo_unfreezeimg /model_best.pt"
     # "workspace/source/downstream/training_output2022-11-22/v0.3_1.00_prev_flamingo_unfreezeall/model_best.pt" ## unfreeze_all
-    # "training_output/2022-11-25/v0.3_1.00_prev_all_flamingo/model_best.pt"
+    # "workspace/training_output/2022-11-25/v0.3_1.00_prev_all_flamingo/model_best.pt" # prev all
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -238,6 +241,7 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description="Evaluating Model")
     get_args(parser)
     args, remaining_args = parser.parse_known_args()
+    set_seed(args.seed)
 
     model_setting_name = args.loaddir.split('/')[-2]
 
@@ -247,29 +251,53 @@ if __name__=='__main__':
     args.n_classes = 2
     
     model = get_model(args)
-    if torch.cuda.device_count() > 1 and args.device != 'cpu':
+    if torch.cuda.device_count() >= 1 and args.device != 'cpu':
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         model = nn.DataParallel(model)
     model.load_state_dict(torch.load(args.loaddir)['state_dict'], strict=True)
     model.to(args.device)
     model.eval()
+    
+    def get_threshold_for_specific_ppv(tgt, total_outs, target_ppv):
+        threshold = 0.6
+        ppv = 0
+        
+        while ppv != target_ppv:
+            threshold += 0.005
+            _, _, metrics, _, _ = cal_performance(tgt, total_outs, threshold=threshold, do_print=False)
+            ppv = round(metrics["ppv(precision)"], 2)
+            
+            if threshold > 1:
+                print('can not find threshold')
+                break;
+            
+        print("threshold for 0.98ppv:", threshold)
+        return threshold
 
-    test_iter = 10 if args.test_with_bootstrap else 1
-    print(f"Number of testing:{test_iter}")
-    metrics_li = []
-
-    for test_i in range(test_iter):
-        seed = test_i if args.test_with_bootstrap else args.seed
-        set_seed(seed)
-
-        val_dataset = get_dataset(args)
-        val_loader = get_data_loaders(args, val=val_dataset)
-        tgt, _, total_outs  = model_eval(args, val_loader)
-        tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=0.903, resultdir=args.resultdir)
-
-        metrics_li.append(metrics)
+    val_dataset = get_dataset(args)
+    val_loader = get_data_loaders(args, val=val_dataset)
+    tgt, _, total_outs  = model_eval(args, val_loader)
+    
+    threshold = get_threshold_for_specific_ppv(tgt, total_outs, target_ppv=0.95)
+    tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=threshold)
 
     if args.test_with_bootstrap:
+        test_iter = 10 if args.test_with_bootstrap else 1
+        print(f"Number of testing:{test_iter}")
+        metrics_li = []
+        for test_i in range(test_iter):
+            seed = test_i if args.test_with_bootstrap else args.seed
+            set_seed(seed)
+
+            val_dataset = get_dataset(args)
+            val_loader = get_data_loaders(args, val=val_dataset)
+            tgt, _, total_outs  = model_eval(args, val_loader)
+            tgts, preds, metrics, matrix, probs = cal_performance(tgt, total_outs, threshold=threshold)
+
+            metrics_li.append(metrics)
+            
+        set_seed(args.seed)
+        
         metrics_avg = metrics.copy()
         metrics_std = metrics.copy()
         metrics_lst = metrics.copy()
@@ -289,14 +317,14 @@ if __name__=='__main__':
         # pd.DataFrame(metrics_lst).to_csv(f'{n}.csv', header = True, index=False)
 
 
+
     is_correct = np.array(tgts) == np.array(preds)
     wrong_idx = np.where(is_correct==False)[0]
-
+    
     true1 = np.where(np.array(tgts)==1)[0]
     pred1 = np.where(np.array(preds)==1)[0]
     true0 = np.where(np.array(tgts)==0)[0]
     pred0 = np.where(np.array(preds)==0)[0]
-
 
     tp_idx = [p for p in pred1 if p in true1 ]
     fp_idx = [p for p in pred1 if p in true0 ]

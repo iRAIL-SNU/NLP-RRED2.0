@@ -4,7 +4,7 @@ hi-ml/
 source/downstream/training_output*/
 inference_result/
 Medical_X-VL/
-training_output/*
+training_output/20*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
