@@ -141,12 +141,14 @@ def get_args(parser):
 
     ### image args ###
     parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
-    parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=480)
+    parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=224) ## for ViT
+    # parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=480)
 
     parser.add_argument("--drop_img_percent", type=float, default=0.0)
     parser.add_argument("--dropout", type=float, default=0.1)
 
     parser.add_argument("--multimodal_model_type", type=str, default="flamingo", choices=["att_pool", "vlbert", 'flamingo', 'coca'])
+    parser.add_argument("--image_model_type", type=str, default="vit", choices=["vit", 'resnet'])
     parser.add_argument("--multimodal_depth", type=int, default=1, choices=[1,2,4,8,12])
     parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
     parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])

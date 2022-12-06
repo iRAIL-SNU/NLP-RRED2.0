@@ -25,7 +25,10 @@ def get_model(args):
     if args.multimodal_model_type == "vlbert":
         return VLBertClf(args)
     elif args.multimodal_model_type == "flamingo":
-        return CXRFlamingo(args)
+        if args.image_model_type == 'vit':
+            return CXRFlamingo_with_ViT(args)
+        elif args.image_model_type == 'resnet':
+            return CXRFlamingo(args)
     elif args.multimodal_model_type == "att_pool":
         return VLModelClf(args)
     elif args.multimodal_model_type == "coca":
@@ -324,4 +327,5 @@ def get_data_loaders(args, train=None, val=None):
         )
 
         return infer_loader
+
 

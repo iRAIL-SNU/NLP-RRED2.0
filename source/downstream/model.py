@@ -12,6 +12,8 @@ from flamingo_pytorch.flamingo_palm import *
 # from models.ibot_vit import VisionTransformer, interpolate_pos_embed, vit_base, vit_small
 # from models.xbert import BertConfig, BertModel
 # from models.model_retrieval import XVLModel
+from ibot_vit import vit_small, interpolate_pos_embed
+
 
 from einops import rearrange, repeat
 
@@ -322,6 +324,131 @@ class CXRFlamingo(nn.Module):
         print("Image model is unfreezed")
             
             
+class CXRFlamingo_with_ViT(nn.Module):
+    def __init__(self, args):
+        super(CXRFlamingo_with_ViT,self).__init__()
+        self.args = args
+
+        language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
+        self.image_model = get_XVL_vit()
+                
+        if self.args.inference or self.args.freeze_txt_all:
+            freeze_model_and_make_eval_(language_model)
+            print("Language model is freezed")
+        if self.args.inference or self.args.freeze_img_all:
+            freeze_model_and_make_eval_(self.image_model)
+            print("Image model is freezed")
+
+        self.dim = 768
+
+        self.perceiver_resampler = PerceiverResampler(
+            dim=384,
+            depth=args.perceiver_depth,
+            dim_head=args.perceiver_dim_head,
+            heads=args.perceiver_num_head,
+            num_latents=args.num_img_token*2,       # the number of latents to shrink your media sequence to, perceiver style
+            num_media_embeds = args.max_num_img, ## max number of images per example
+        )
+
+        self.img_attn_pool_last = CrossAttention(dim=self.dim, context_dim=self.dim, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm_last = LayerNorm(self.dim)
+
+        self.text_embdding = language_model.bert.embeddings
+        lm_layers = language_model.bert.encoder.layer
+        
+        self.encoder_layers = nn.ModuleList([])
+
+        if self.args.cross_attn_order == 'single->cross':
+            for i in range(len(lm_layers)):
+                self.encoder_layers.append(nn.ModuleList([
+                    lm_layers[i],
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=True) if not (i % args.cross_attn_every) else None
+                ])
+            )
+        elif self.args.cross_attn_order == 'cross->single':
+            for i in range(len(lm_layers)):
+                self.encoder_layers.append(nn.ModuleList([
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=True) if not (i % args.cross_attn_every) else None,
+                    lm_layers[i]
+                ])
+            )
+
+        self.to_logits = nn.Sequential(
+            LayerNorm(self.dim*2),
+            nn.Linear(self.dim*2, args.n_classes, bias=False)
+        )
+
+    def forward(self, findingss, impression, images):
+        findings, prev_findings = findingss
+
+        txt, segment, attention_mask = findings
+        findings_embed = self.text_embdding(txt, token_type_ids=segment)
+
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        if self.args.use_prev_txt:
+            prev_txt, prev_segment, prev_attention_mask = prev_findings
+            prev_findings_embed = self.text_embdding(prev_txt, token_type_ids=prev_segment)
+
+            prev_extended_attention_mask = prev_attention_mask.unsqueeze(1).unsqueeze(2)
+            prev_extended_attention_mask = (1.0 - prev_extended_attention_mask) * -10000.0
+
+            findings_embed = torch.cat((findings_embed, prev_findings_embed),dim = 1)
+            extended_attention_mask = torch.cat((extended_attention_mask, prev_extended_attention_mask), dim=3)
+            segment = torch.cat((segment, prev_segment), dim = 1)
+        # impression_embed = self.text_embdding(txt)
+
+        media_locations = torch.zeros_like(segment).bool().to(self.args.device)
+        for i, media_location in enumerate(media_locations):
+            media_location[0] = True
+            media_location[segment[i].argmax()] = True
+
+        image, prev_image = images
+        img = self.image_model(image)  # Bxn_channelxWxH --> Bx2048x15x15
+        
+        #use prev image
+        if self.args.use_prev_img:
+            prev_img = self.image_model(prev_image)  # Bxn_channelxWxH --> Bx2048x15x15
+
+            img = rearrange(img, 'b n d -> b 1 n d')
+            prev_img = rearrange(prev_img, 'b n d -> b 1 n d')
+                    
+            if self.args.img_to_each_perceiver:
+                prev_img= self.perceiver_resampler(prev_img) 
+            else:
+                img = torch.cat((img,prev_img), dim=1)
+                    
+        img = self.perceiver_resampler(img) 
+        if self.args.img_to_each_perceiver:
+            img = torch.cat((img,prev_img), dim=1)
+
+        img = torch.reshape(img, (img.shape[0], img.shape[1], -1, self.dim))
+
+        if self.args.cross_attn_order == 'cross->single':
+            for xattn_layer, lm_layer in self.encoder_layers:
+                if exists(xattn_layer) and exists(img):
+                    findings_embed = xattn_layer(findings_embed, img, media_locations=media_locations)
+                findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
+        elif self.args.cross_attn_order == 'single->cross':
+            for lm_layer, xattn_layer in self.encoder_layers:
+                findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
+                if exists(xattn_layer) and exists(img):
+                    findings_embed = xattn_layer(findings_embed, img, media_locations=media_locations)
+
+        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
+        img = self.img_attn_pool_norm_last(img)
+
+        return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1)) #### 이거 findings_embed[:,0,:] 으로 해보자
+        # return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,0,:]), 1)) 
+
+    def unfreeze_image_model(self):
+        self.image_model.train()
+        unfreeze_all_layers_(self.image_model)
+        print("Image model is unfreezed")
+            
+            
+            
 class CXRFlamingoForErrorDetection(nn.Module):
     def __init__(self,args):
         super(CXRFlamingoForErrorDetection,self).__init__()
@@ -618,3 +745,29 @@ class CXRCoCa(nn.Module):
 #         xvlmodel = XVLModel(config, tokenizer)
     
 #         print('done')
+
+def get_XVL_vit():
+        visual_encoder = vit_small(
+            img_size=(224, 224),
+            patch_size=16,
+            drop_path_rate=0.1,
+            return_all_tokens=True,
+            masked_im_modeling=False,
+        )
+        #visual_encoder = ibot_utils.MultiCropWrapper(visual_encoder, None)
+        state_dict = torch.load('workspace/VLP_chest.pth')['model']
+        pos_embed_reshaped = interpolate_pos_embed(state_dict['visual_encoder.backbone.pos_embed'], visual_encoder)
+        state_dict['visual_encoder.backbone.pos_embed'] = pos_embed_reshaped
+        
+        state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
+        for key in list(state_dict.keys()):
+            if 'visual_encoder' in key:
+                encoder_key = key.replace('visual_encoder.', '')
+                state_dict[encoder_key] = state_dict[key]
+                del state_dict[key]
+            else:
+                del state_dict[key]
+
+        visual_encoder.load_state_dict(state_dict, strict=False)
+        
+        return visual_encoder
