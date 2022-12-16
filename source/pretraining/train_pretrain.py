@@ -4,7 +4,6 @@ Construct CXR-BERT or BertForMaskedLM, Training and Saving
 import os
 import tqdm
 import wandb
-import datetime
 import numpy as np
 
 import torch
@@ -12,11 +11,8 @@ import torch.nn as nn
 
 
 import sys
-sys.path.insert(1, '/home/workspace/source/model/report_coca')
-from report_coca import ReportCoCa
 
-from model import CXRFlamingoForPreTraining
-
+from helpers import get_language_model
 
 from transformers.optimization import AdamW
 from transformers import AutoModel, BertConfig, AlbertConfig, AutoConfig
@@ -324,9 +320,9 @@ class VLCXR_Trainer():
             print('training restart with mid epoch')
             print(config)
         else:
-            print("Initializing model weights with random values")
+            print(f"Initializing model weights with {args.model}")
 
-            self.model = CXRFlamingoForPreTraining(args).to(self.device)
+            self.model = get_language_model(args).to(self.device)
 
         # wandb.watch(self.model)
 
@@ -337,6 +333,9 @@ class VLCXR_Trainer():
 
         self.train_data = train_dataloader
         self.test_data = test_dataloader
+
+        self.mlm_criterion = nn.CrossEntropyLoss(ignore_index=-100)
+        self.itm_criterion = nn.CrossEntropyLoss()
 
         self.scaler = GradScaler()
         self.optimizer = AdamW(self.model.parameters(), lr=args.lr)
@@ -370,42 +369,16 @@ class VLCXR_Trainer():
 
         for i, data in train_data_iter:
             with autocast():
-                cls_tok, input_ids, txt_labels, attn_masks, img, segment, is_aligned, sep_tok, itm_prob = data
+                input_ids, txt_labels, attn_masks, segment= data
 
-                cls_tok = cls_tok.to(self.device)
                 input_ids = input_ids.to(self.device)
                 txt_labels = txt_labels.to(self.device)
                 attn_masks = attn_masks.to(self.device)
-                img = img.to(self.device)
                 segment = segment.to(self.device)
-                is_aligned = is_aligned.to(self.device)
-                sep_tok = sep_tok.to(self.device)
 
-                # if self.args.itm_task:
-                mlm_output = self.model(cls_tok, input_ids, attn_masks, segment, img, sep_tok)
-                # else:
-                #     mlm_output = self.model(cls_tok, input_ids, attn_masks, segment, sep_tok)
+                mlm_output = self.model(input_ids, attn_masks, segment)['logits']
 
-
-                if self.args.mlm_task and self.args.itm_task == False:
-                    mlm_loss = self.mlm_criterion(mlm_output.transpose(1, 2), txt_labels)
-                    loss = mlm_loss
-                    # print('only mlm_loss')
-
-                if self.args.itm_task and self.args.mlm_task == False:
-                    itm_loss = self.itm_criterion(itm_output, is_aligned)
-                    loss = itm_loss
-                    print('only itm_loss')
-
-                if self.args.mlm_task and self.args.itm_task:
-
-                    mlm_loss = self.mlm_criterion(mlm_output.transpose(1, 2), txt_labels)
-                    train_mlm_loss.append(mlm_loss.item())
-
-                    itm_loss = self.itm_criterion(itm_output, is_aligned)
-                    train_itm_loss.append(itm_loss.item())
-
-                    loss = itm_loss + mlm_loss
+                loss = self.mlm_criterion(mlm_output.transpose(1, 2), txt_labels)
 
                 if i % 100 == 0:
                     print(f"step {i}, train loss: {loss.item()}")
@@ -422,46 +395,23 @@ class VLCXR_Trainer():
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 self.optimizer.zero_grad()
+                
 
-            if self.args.itm_task:
-                correct = itm_output.argmax(dim=-1).eq(is_aligned).sum().item()
-                total_correct += correct
-                total_element += is_aligned.nelement()
-
-            if self.args.mlm_task:
-                eq = (mlm_output.argmax(dim=-1).eq(txt_labels)).cpu().numpy()
-                txt_labels_np = txt_labels.cpu().numpy()
-                for bs, label in enumerate(txt_labels_np):
-                    index = np.where(label == -100)[0]
-                    f_label = np.delete(label, index)
-                    f_eq = np.delete(eq[bs], index)
-                    total_mlm_correct += f_eq.sum()
-                    total_mlm_element += len(f_label)
+            eq = (mlm_output.argmax(dim=-1).eq(txt_labels)).cpu().numpy()
+            txt_labels_np = txt_labels.cpu().numpy()
+            for bs, label in enumerate(txt_labels_np):
+                index = np.where(label == -100)[0]
+                f_label = np.delete(label, index)
+                f_eq = np.delete(eq[bs], index)
+                total_mlm_correct += f_eq.sum()
+                total_mlm_element += len(f_label)
 
         print("avg loss per epoch", np.mean(train_losses))
-        if self.args.mlm_task and self.args.itm_task:
-            print("avg itm acc per epoch", round(total_correct / total_element * 100, 3))
-            wandb.log({
-                "avg_loss": np.mean(train_losses),
-                "avg_mlm_loss": np.mean(train_mlm_loss),
-                "avg_itm_loss": np.mean(train_itm_loss),
-                "itm_acc": total_correct / total_element * 100,
-                "mlm_acc": total_mlm_correct / total_mlm_element * 100
-            }, step=epoch)
 
-        if self.args.itm_task and self.args.mlm_task == False:
-            print("avg itm acc per epoch", round(total_correct / total_element * 100, 3))
-
-            wandb.log({
-                "avg_loss": np.mean(train_losses),
-                "itm_epoch_acc": total_correct / total_element * 100
-            }, step=epoch)
-
-        if self.args.mlm_task and self.args.itm_task == False:
-            wandb.log({
-                "avg_loss": np.mean(train_losses),
-                "mlm_epoch_acc": total_mlm_correct / total_mlm_element * 100
-            }, step=epoch)
+        # wandb.log({
+        #     "avg_loss": np.mean(train_losses),
+        #     "mlm_epoch_acc": total_mlm_correct / total_mlm_element * 100
+        # }, step=epoch)
 
         test_data_iter = tqdm.tqdm(enumerate(self.test_data),
                                    desc=f'EP_:{epoch}',
@@ -471,83 +421,38 @@ class VLCXR_Trainer():
         with torch.no_grad():
             eval_losses = []
             eval_mlm_loss = []
-            eval_itm_loss = []
             for i, data in test_data_iter:
-                cls_tok, input_ids, txt_labels, attn_masks, img, segment, is_aligned, sep_tok, itm_prob = data
-                # cls_tok, input_ids, txt_labels, attn_masks, img, segment, is_aligned, sep_tok = data
+                input_ids, txt_labels, attn_masks, segment= data
 
-                cls_tok = cls_tok.to(self.device)
                 input_ids = input_ids.to(self.device)
                 txt_labels = txt_labels.to(self.device)
                 attn_masks = attn_masks.to(self.device)
-                img = img.to(self.device)
                 segment = segment.to(self.device)
-                is_aligned = is_aligned.to(self.device)
-                sep_tok = sep_tok.to(self.device)
 
-                mlm_output = self.model(cls_tok, input_ids, attn_masks, segment, img, sep_tok)
+                mlm_output = self.model(input_ids, attn_masks, segment)['logits']
 
                 if self.args.mlm_task and self.args.itm_task == False:
                     valid_mlm_loss = self.mlm_criterion(mlm_output.transpose(1, 2), txt_labels)
                     valid_loss = valid_mlm_loss
-                    # print('only valid mlm loss')
-
-                if self.args.itm_task and self.args.mlm_task == False:
-                    valid_itm_loss = self.itm_criterion(itm_output, is_aligned)
-                    valid_loss = valid_itm_loss
-                    print('only valid itm loss')
-
-                if self.args.mlm_task and self.args.itm_task:
-                    # TODO: weight each loss, mlm > itm
-                    valid_mlm_loss = self.mlm_criterion(mlm_output.transpose(1, 2), txt_labels)
-                    valid_itm_loss = self.itm_criterion(itm_output, is_aligned)
-                    eval_mlm_loss.append(valid_mlm_loss.item())
-                    eval_itm_loss.append(valid_itm_loss.item())
-
-                    valid_loss = valid_itm_loss + valid_mlm_loss
+                    # print('only valid mlm loss')s
 
                 eval_losses.append(valid_loss.item())
-
-                if self.args.itm_task:
-                    valid_correct = itm_output.argmax(dim=-1).eq(is_aligned).sum().item()
-                    total_valid_correct += valid_correct
-                    total_valid_element += is_aligned.nelement()
-
-                if self.args.mlm_task:
-                    eq = (mlm_output.argmax(dim=-1).eq(txt_labels)).cpu().numpy()
-                    txt_labels_np = txt_labels.cpu().numpy()
-                    for bs, label in enumerate(txt_labels_np):
-                        index = np.where(label == -100)[0]
-                        f_label = np.delete(label, index)
-                        f_eq = np.delete(eq[bs], index)
-                        total_mlm_valid_correct += f_eq.sum()
-                        total_mlm_valid_element += len(f_label)
+                
+                eq = (mlm_output.argmax(dim=-1).eq(txt_labels)).cpu().numpy()
+                txt_labels_np = txt_labels.cpu().numpy()
+                for bs, label in enumerate(txt_labels_np):
+                    index = np.where(label == -100)[0]
+                    f_label = np.delete(label, index)
+                    f_eq = np.delete(eq[bs], index)
+                    total_mlm_valid_correct += f_eq.sum()
+                    total_mlm_valid_element += len(f_label)
 
             print("avg loss in testset", np.mean(eval_losses))
-
-            if self.args.mlm_task and self.args.itm_task:
-                print("avg itm acc in testset", round(total_valid_correct / total_valid_element * 100, 3))
-                wandb.log({
-                    "eval_avg_loss": np.mean(eval_losses),
-                    "eval_mlm_loss": np.mean(eval_mlm_loss),
-                    "eval_itm_loss": np.mean(eval_itm_loss),
-                    "eval_itm_acc": total_valid_correct / total_valid_element * 100,
-                    "eval_mlm_acc": total_mlm_valid_correct / total_mlm_valid_element * 100
-                }, step=epoch)
-
-            if self.args.itm_task and self.args.mlm_task == False:
-                print("avg itm acc in testset", round(total_valid_correct / total_valid_element * 100, 3))
-
-                wandb.log({
-                    "eval_avg_loss": np.mean(eval_losses),
-                    "eval_itm_epoch_acc": total_valid_correct / total_valid_element * 100
-                }, step=epoch)
-
-            if self.args.mlm_task and self.args.itm_task == False:
-                wandb.log({
-                    "eval_avg_loss": np.mean(eval_losses),
-                    "eval_mlm_epoch_acc": total_mlm_valid_correct / total_mlm_valid_element * 100
-                }, step=epoch)
+            
+            # wandb.log({
+            #     "eval_avg_loss": np.mean(eval_losses),
+            #     "eval_mlm_epoch_acc": total_mlm_valid_correct / total_mlm_valid_element * 100
+            # }, step=epoch)
 
     def save(self, epoch, file_path):
         save_path_per_ep = os.path.join(file_path, str(epoch))

@@ -583,7 +583,7 @@ class CXRDataset_DABIN(Dataset):
 class VLCXRDataset(Dataset):
     def __init__(self, data_path, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations=None):
         self.args = args
-        self.data = [json.loads(l) for l in open(os.path.join(args.data_path,data_path))]#[:100]
+        self.data = [json.loads(l) for l in open(os.path.join(args.data_path,data_path))][:100]
 
         self.max_seq_len = args.max_seq_len  # 512
 
@@ -600,19 +600,8 @@ class VLCXRDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-
-        origin_findings, origin_impression, img_path, is_aligned, itm_prob = self.random_pair_sampling(idx)
-        origin_txt = origin_findings + " [SEP] " + origin_impression
-
-        image = None
-        if os.path.isfile(img_path):
-            image = Image.open(img_path)
-        else:
-            imarray = np.random.rand(2544,3056) * 255
-            image = Image.fromarray(imarray.astype('uint8'))
-            
-        image = self.augmentations(image)
-        image = self.transforms(image)
+        origin_findings, origin_impression = self.data[idx]['Findings'], self.data[idx]['Impression']
+        origin_txt = " [CLS] " + origin_findings + " [SEP] " + origin_impression
 
         tokenized_sentence = self.tokenizer(origin_txt)  # ['i','ate','an','apple'], no special token
         truncate_txt(tokenized_sentence, self.max_seq_len)
@@ -624,84 +613,37 @@ class VLCXRDataset(Dataset):
             encoded_sentence = [self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi["[UNK]"]
                                 for w in tokenized_sentence]  # [178, 8756, 1126, 12075]
 
-        
-        meaningful_idx = where_to_mask(origin_txt, self.knowledge_vocab, self.tokenizer)
-        # input_ids, txt_labels = self.random_word(encoded_sentence)
-        input_ids, txt_labels = self.random_knowledge(encoded_sentence, meaningful_idx, num_knowledge=10)
+        if self.args.use_MKP:
+            meaningful_idx = where_to_mask(origin_txt, self.knowledge_vocab, self.tokenizer)
+            input_ids, txt_labels = self.random_knowledge(encoded_sentence, meaningful_idx, num_knowledge=10)
+        else:
+            input_ids, txt_labels = self.random_word(encoded_sentence)
 
-######################### 여기까지 됐음
-
-        attn_masks_t = [1] * len(input_ids)
+        attn_masks = [1] * len(input_ids)
 
         if self.args.bert_model in ["albert-base-v2", 'xlm-roberta-base', 'xlm-roberta-large']:
-            padding = [self.vocab.stoi["<pad>"] for _ in range(self.seq_len - len(input_ids) + 1)]  # [SEP]
-            label_padding = [-100 for _ in range(self.seq_len - len(input_ids) + 1)]  # [SEP]
+            padding = [self.vocab.stoi["<pad>"] for _ in range(self.max_seq_len - len(input_ids))]
+            label_padding = [-100 for _ in range(self.max_seq_len - len(input_ids))]
         else:
-            padding = [self.vocab.stoi["[PAD]"] for _ in range(self.seq_len - len(input_ids) + 1)]  # [SEP]
-            label_padding = [-100 for _ in range(self.seq_len - len(input_ids) + 1)]  # [SEP]
+            padding = [self.vocab.stoi["[PAD]"] for _ in range(self.max_seq_len - len(input_ids))]
+            label_padding = [-100 for _ in range(self.max_seq_len - len(input_ids))]
 
         input_ids.extend(padding)
-        attn_masks_t.extend(padding)
-        txt_labels_t.extend(label_padding)
+        attn_masks.extend(padding)
+        txt_labels.extend(label_padding)
 
-        txt_labels = txt_labels_i + txt_labels_t
-        attn_masks = attn_masks_i + attn_masks_t  # attn_masks [1, 1, 1, 1, 1, 1, 1, 1, 0, 0] -> Img_feat, Token, Pad
+        segment = [0 for _ in range(self.max_seq_len)]
 
-        segment = [1 for _ in range(self.seq_len + 1)]  # 2 [SEP]
-
-        cls_tok = [self.vocab.stoi["[CLS]"]]
-        cls_tok = torch.tensor(cls_tok)
         input_ids_tensor = torch.tensor(input_ids)
         txt_labels = torch.tensor(txt_labels)
         segment = torch.tensor(segment)
-        is_aligned = torch.tensor(is_aligned)
 
-        attn_1d = torch.tensor(attn_masks)
+        attn_masks = torch.tensor(attn_masks)
 
-        full_attn = torch.tensor((attn_masks_i + attn_masks_t),
-                                 dtype=torch.long).unsqueeze(0).expand(self.total_len, self.total_len).clone()
-
-        extended_attn_masks = torch.zeros(self.total_len, self.total_len, dtype=torch.long)
-        second_st, second_end = self.args.num_image_embeds + 2, self.args.num_image_embeds + 2 + len(input_ids)
-        extended_attn_masks[:, :self.args.num_image_embeds + 2].fill_(1)
-        extended_attn_masks[second_st:second_end, second_st:second_end].copy_(
-            self._tril_matrix[:second_end - second_st, :second_end - second_st])
-        s2s_attn = extended_attn_masks
-
-        mixed_lst = [full_attn, s2s_attn]
-
-        if self.args.Mixed:
-            # print('Mixed attn mask')
-            assert (self.args.s2s_prob + self.args.bi_prob) == 1.0
-            attn_masks_tensor = random.choices(mixed_lst, weights=[self.args.bi_prob, self.args.s2s_prob])[0]
-            # print(f'S2S {self.args.s2s_prob} vs Bi {self.args.bi_prob}')
-
-        elif self.args.BAR_attn:
-            # print('BAR_attn attn mask')
-            extended_attn_masks[:self.args.num_image_embeds+2, :].fill_(1)
-            attn_masks_tensor = extended_attn_masks
-
-        elif self.args.disturbing_mask:
-            baseline_attn = torch.zeros(self.total_len, self.total_len, dtype=torch.long)
-            baseline_attn[:self.args.num_image_embeds + 2, :self.args.num_image_embeds + 2].fill_(1)
-            baseline_attn[self.args.num_image_embeds + 2:, self.args.num_image_embeds + 2:].fill_(1)
-            attn_masks_tensor = baseline_attn
-
-        else:
-            if self.args.attn_1d:
-                # print('1d_bidirectional attn mask')
-                attn_masks_tensor = attn_1d  # '1d attention mask'
-
-            else:
-                # print('full_bidirecitonal attn mask')
-                attn_masks_tensor = full_attn  # 'Full attention mask'
-
-        sep_tok = [self.vocab.stoi["[SEP]"]]
-        sep_tok = torch.tensor(sep_tok)
-
-        return cls_tok, input_ids_tensor, txt_labels, attn_masks_tensor, image, segment, is_aligned, sep_tok, itm_prob
+        return input_ids_tensor, txt_labels, attn_masks, segment
 
     def random_pair_sampling(self, idx):
+        # suffle image-text pair
         d_label = self.data[idx]['chexpert_label']
         d_findings = self.data[idx]['Findings']
         d_impression = self.data[idx]['Impression']
@@ -790,10 +732,40 @@ class VLCXRDataset(Dataset):
 
         return tokens, output_label
 
+    def random_word(self, tokens):
+        output_label = []
+
+        for i, token in enumerate(tokens):
+            prob = random.random()
+            if prob < 0.15:
+                prob /= 0.15
+
+                # 80% randomly change token to mask token
+                if prob < 0.8:
+                    tokens[i] = self.vocab.stoi["[MASK]"]
+
+                # 10% randomly change token to random token
+                elif prob < 0.9:
+                    tokens[i] = random.randrange(self.vocab.vocab_sz)
+
+                output_label.append(token)
+            else:
+                tokens[i] = token
+                output_label.append(-100)  # 0
+
+        if all(o == -100 for o in output_label):  # 0
+            # at least one mask
+            output_label[0] = tokens[0]
+            tokens[0] = self.vocab.stoi["[MASK]"]
+
+        return tokens, output_label
+
+
     def get_random_line(self):
         rand_num = random.randint(0, len(self.data) - 1)
         findings = self.data[rand_num]['Findings']
         impression = self.data[rand_num]['impression']
         label = self.data[rand_num]['chexpert_label']
         return findings, impression, label
+        
         

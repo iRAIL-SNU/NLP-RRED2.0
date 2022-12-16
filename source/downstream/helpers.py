@@ -131,6 +131,11 @@ def get_vocab(args):
         vocab.stoi = bert_tokenizer.vocab
         vocab.itos = bert_tokenizer.convert_ids_to_tokens
         vocab.vocab_sz = bert_tokenizer.vocab_size
+    elif args.model == 'xvl-bert':
+        bert_tokenizer = AutoTokenizer.from_pretrained("Medical_X-VL/my_tokenizer/")
+        vocab.stoi = bert_tokenizer.vocab
+        vocab.itos = bert_tokenizer.convert_ids_to_tokens
+        vocab.vocab_sz = bert_tokenizer.vocab_size
     else:
         word_list = get_glove_words(args.glove_path)
         vocab.add(word_list)
@@ -191,6 +196,8 @@ def get_tokenizer(args):
     elif args.model == 'cxr-bert':
         # tokenizer = AutoTokenizer.from_pretrained(args.bert_model, trust_remote_code=True).tokenize
         tokenizer = CXRBertTokenizer.from_pretrained(args.bert_model, revision='v1.1').tokenize
+    elif args.model == 'xvl-bert':
+        tokenizer = AutoTokenizer.from_pretrained("Medical_X-VL/my_tokenizer/").tokenize
     else:
         str.split
 

@@ -4,7 +4,7 @@ MedViLL, pre-training model main run.py
 import os
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# os.environ["CUDA_VISIBLE_DEVICES"] = "5,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 import wandb
@@ -17,10 +17,10 @@ from health_multimodal.image.data.transforms import create_chest_xray_transform_
 from torch.utils.data import DataLoader
 
 import sys
-sys.path.insert(1, '/home/workspace/source/utils')
+sys.path.insert(1, 'workspace/source/downstream/utils')
 from utils import *
-sys.path.insert(1, '/home/workspace/source/downstream')
-from helpers import get_tokenizer, get_image_augmentations, get_vocab
+
+from helpers import get_tokenizer, get_vocab#, get_image_augmentations
 
 from train_pretrain import VLCXR_Trainer  # CXR-BERT
 
@@ -41,16 +41,21 @@ def train(args):
 
     tokenizer = get_tokenizer(args)
     vocab = get_vocab(args)
-    transforms = create_chest_xray_transform_for_inference(
-        resize=args.TRANSFORM_RESIZE,
-        center_crop_size=args.TRANSFORM_CENTER_CROP_SIZE
-    )
-    augmentations_img = get_image_augmentations(args.img_aug) 
+    
+    transforms, augmentations_img = None, None
+    if args.use_image:
+        transforms = create_chest_xray_transform_for_inference(
+            resize=args.TRANSFORM_RESIZE,
+            center_crop_size=args.TRANSFORM_CENTER_CROP_SIZE
+        )
+        augmentations_img = get_image_augmentations(args.img_aug) 
 
-    with open('data/medical_words/phrase_vocab.pkl', 'rb') as f:
-        phrase_vocab = pickle.load(f)
-    entity_vocab = extract_medical_vocab('data/medical_words')
-    knowledge_vocab = phrase_vocab + entity_vocab
+    knowledge_vocab = None
+    if args.use_MKP:
+        with open('data/medical_words/phrase_vocab.pkl', 'rb') as f:
+            phrase_vocab = pickle.load(f)
+        entity_vocab = extract_medical_vocab('data/medical_words')
+        knowledge_vocab = phrase_vocab + entity_vocab
 
     print("Load Train dataset", args.train_dataset)
     train_dataset = VLCXRDataset(args.train_dataset, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations_img)
@@ -105,9 +110,9 @@ if __name__ == '__main__':
     parser.add_argument("--project_name", type=str, default='RRED2.0_pretrain_ex1')
 
     parser.add_argument("--epochs", type=int, default=100, help='number of epochs')
-    parser.add_argument("--batch_size", type=int, default=8, help="number of batch size")
+    parser.add_argument("--batch_size", type=int, default=1, help="number of batch size")
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=128)  # loss, optimizer.step() slowly
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)  # loss, optimizer.step() slowly
     parser.add_argument("--warmup", type=float, default=0.1)  # optimizer = BertAdam(warmup=args.warmup)
     parser.add_argument("--warmup_steps", type=int, default=0)
     parser.add_argument("--dropout_prob", type=float, default=0.1)
@@ -140,17 +145,18 @@ if __name__ == '__main__':
     parser.add_argument("--log_freq", type=int, default=10, help="printing loss every n inter: setting n")
 
     parser.add_argument("--device", type=str, default='cuda')
-    parser.add_argument("--use_ddp", type=bool, default=False)
+    parser.add_argument("--use_ddp", type=str2bool, default=False)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--num_workers", type=int, default=32, help="dataloader worker size")
 
     ## pre_trained_model_path, weight_load
-    parser.add_argument("--weight_load", type=bool, default=False, help='pre-trained_model_mid_epoch_load')
+    parser.add_argument("--weight_load", type=str2bool, default=False, help='pre-trained_model_mid_epoch_load')
     parser.add_argument("--pre_trained_model_path", type=str,
-                        default=''
-                        )
+                        default=None)
 
     ### Image Encoder args ###
+    parser.add_argument("--use_image", type=str2bool, default=False, help='vision-language? or language?')
+
     parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
     parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=480)
     
@@ -169,6 +175,8 @@ if __name__ == '__main__':
 
 
     ### Languagemodel args ###
+    parser.add_argument("--use_MKP", type=str2bool, default=False, help='use medical vocab?')
+
     parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert'])
     parser.add_argument("--bert_model", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized",
                         choices=["bert-base-uncased, emilyalsentzer/Bio_ClinicalBERT", "xlm-roberta-base", '/home/workspace/Multi-modality-Self-supervision/GatorTron', 'microsoft/BiomedVLP-CXR-BERT-specialized'])
@@ -178,7 +186,7 @@ if __name__ == '__main__':
     parser.add_argument("--max_seq_len", type=int, default=512, help="total sequence len")
 
     parser.add_argument("--mlm_loss_weight", type=float, default=1.)
-    parser.add_argument("--itm_loss_weight", type=float, default=1.)
+    parser.add_argument("--itm_loss_weight", type=float, default=0.)
 
     
 

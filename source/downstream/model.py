@@ -19,6 +19,8 @@ from einops import rearrange, repeat
 
 import transformers
 
+import xbert
+
 MODEL_TYPE = "resnet50"
 
 def gelu(x):
@@ -329,8 +331,11 @@ class CXRFlamingo_with_ViT(nn.Module):
         super(CXRFlamingo_with_ViT,self).__init__()
         self.args = args
 
-        language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
-        self.image_model = get_XVL_vit()
+        get_text_encoder = True if self.args.model == "xvl-bert" else False
+        self.image_model, language_model = get_XVL(get_text_encoder=get_text_encoder)
+        
+        if self.args.model =="cxr-bert":
+           language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
                 
         if self.args.inference or self.args.freeze_txt_all:
             freeze_model_and_make_eval_(language_model)
@@ -339,7 +344,7 @@ class CXRFlamingo_with_ViT(nn.Module):
             freeze_model_and_make_eval_(self.image_model)
             print("Image model is freezed")
 
-        self.dim = 768
+        self.dim = 384 if self.args.model == 'xvl-bert' else 768
 
         self.perceiver_resampler = PerceiverResampler(
             dim=384,
@@ -353,8 +358,12 @@ class CXRFlamingo_with_ViT(nn.Module):
         self.img_attn_pool_last = CrossAttention(dim=self.dim, context_dim=self.dim, dim_head=64, heads=8, norm_context=True)
         self.img_attn_pool_norm_last = LayerNorm(self.dim)
 
-        self.text_embdding = language_model.bert.embeddings
-        lm_layers = language_model.bert.encoder.layer
+        if self.args.model == "xvl-bert":
+            self.text_embdding = language_model.embeddings
+            lm_layers = language_model.encoder.layer
+        else:
+            self.text_embdding = language_model.bert.embeddings
+            lm_layers = language_model.bert.encoder.layer
         
         self.encoder_layers = nn.ModuleList([])
 
@@ -436,7 +445,8 @@ class CXRFlamingo_with_ViT(nn.Module):
                 if exists(xattn_layer) and exists(img):
                     findings_embed = xattn_layer(findings_embed, img, media_locations=media_locations)
 
-        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
+        # img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
+        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img[:,0])
         img = self.img_attn_pool_norm_last(img)
 
         return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1)) #### 이거 findings_embed[:,0,:] 으로 해보자
@@ -746,7 +756,7 @@ class CXRCoCa(nn.Module):
     
 #         print('done')
 
-def get_XVL_vit():
+def get_XVL(get_text_encoder=False):
         visual_encoder = vit_small(
             img_size=(224, 224),
             patch_size=16,
@@ -766,8 +776,42 @@ def get_XVL_vit():
                 state_dict[encoder_key] = state_dict[key]
                 del state_dict[key]
             else:
-                del state_dict[key]
+                if not get_text_encoder:
+                    del state_dict[key] 
 
         visual_encoder.load_state_dict(state_dict, strict=False)
         
-        return visual_encoder
+        text_encoder=None
+        if get_text_encoder:
+            
+            config = {
+                "attention_probs_dropout_prob": 0.1,
+                "hidden_act": "gelu",
+                "hidden_dropout_prob": 0.1,
+                "hidden_size": 384,
+                "initializer_range": 0.02,
+                "intermediate_size": 3072,
+                "layer_norm_eps": 1e-12,
+                "max_position_embeddings": 512,
+                "model_type": "bert",
+                "num_attention_heads": 12,
+                "num_hidden_layers": 12,
+                "pad_token_id": 0,
+                "type_vocab_size": 2,
+                "vocab_size": 30522,
+                "fusion_layer": 12,
+                "encoder_width": 384
+            }
+            
+            bert_config = xbert.BertConfig.from_dict(config)
+            text_encoder = xbert.BertModel(config=bert_config, add_pooling_layer=False)
+            
+            for key in list(state_dict.keys()):
+                if 'text_encoder.bert.' in key:
+                    encoder_key = key.replace('text_encoder.bert.', '')
+                    state_dict[encoder_key] = state_dict[key]
+                    del state_dict[key]
+            
+            text_encoder.load_state_dict(state_dict, strict=False)
+        
+        return visual_encoder, text_encoder
