@@ -3,7 +3,7 @@ from random import choices
 import pandas as pd
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import csv
 import argparse
 from sklearn.metrics import f1_score, accuracy_score, roc_auc_score, confusion_matrix
@@ -38,7 +38,7 @@ def get_args(parser):
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--max_epochs", type=int, default=20)
 
-    parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert'])
+    parser.add_argument("--model", type=str, default="xvl-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert', 'xvl-bert'])
     parser.add_argument("--task_type", type=str, default="binary", choices=["multilabel", "classification", "binary"])
     parser.add_argument("--n_classes", type=int, default=2)
 
@@ -46,7 +46,7 @@ def get_args(parser):
     parser.add_argument("--use_ddp", type=str2bool, default=False)
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--n_workers", type=int, default=32)
-    parser.add_argument("--patience", type=int, default=5)
+    parser.add_argument("--patience", type=int, default=10)
 
     now = datetime.now()
     now = now.strftime('%Y-%m-%d')
@@ -140,7 +140,8 @@ def get_args(parser):
                         choices=["bert-base-uncased", "xlm-roberta-base", 'microsoft/BiomedVLP-CXR-BERT-specialized'])
 
     ### image args ###
-    parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
+    parser.add_argument("--TRANSFORM_RESIZE", type=int, default=240) ## for ViT
+    # parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
     parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=224) ## for ViT
     # parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=480)
 

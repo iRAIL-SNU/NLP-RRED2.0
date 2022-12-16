@@ -150,9 +150,11 @@ def get_args(parser):
     # "workspace/source/downstream/training_output2022-11-17/v0.3_1.00_flamingo_rrc_testsampling1.00/checkpoint.pt"
     # "workspace/source/downstream/training_output2022-11-18/v0.3_1.00_prev_flamingo/model_best.pt"
     # "workspace/source/downstream/training_output2022-11-21/v0.3_1.00_prev_flamingo_perceiver_large/model_best.pt"
-    "workspace/source/downstream/training_output2022-11-23/v0.3_1.00_prev_flamingo_unfreezeimg /model_best.pt"
+    # "workspace/source/downstream/training_output2022-11-23/v0.3_1.00_prev_flamingo_unfreezeimg /model_best.pt"
     # "workspace/source/downstream/training_output2022-11-22/v0.3_1.00_prev_flamingo_unfreezeall/model_best.pt" ## unfreeze_all
     # "workspace/training_output/2022-11-25/v0.3_1.00_prev_all_flamingo/model_best.pt" # prev all
+    # "training_output/2022-12-06/v0.3_1.00_flamingoViT/model_best.pt"
+    "training_output/2022-12-09/v0.3_1.00_prev_txt_flamingoViT/model_best.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -208,12 +210,13 @@ def get_args(parser):
     parser.add_argument("--init_model", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized",
                         choices=["bert-base-uncased", "xlm-roberta-base", 'microsoft/BiomedVLP-CXR-BERT-specialized'])
 
-    parser.add_argument("--TRANSFORM_RESIZE", type=int, default=512)
-    parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=480)
+    parser.add_argument("--TRANSFORM_RESIZE", type=int, default=240)
+    parser.add_argument("--TRANSFORM_CENTER_CROP_SIZE", type=int, default=224)
 
     parser.add_argument("--dropout", type=float, default=0.1)
 
     parser.add_argument("--multimodal_model_type", type=str, default="flamingo", choices=["att_pool", "vlbert", 'flamingo', 'coca'])
+    parser.add_argument("--image_model_type", type=str, default="vit", choices=["vit", 'resnet'])
     parser.add_argument("--multimodal_depth", type=int, default=12, choices=[1,2,4,8,12])
     parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
     parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])
@@ -222,8 +225,8 @@ def get_args(parser):
     parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12])
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
-    parser.add_argument("--use_prev_img", type=str2bool, default=True)
-    parser.add_argument("--use_prev_txt", type=str2bool, default=False)
+    parser.add_argument("--use_prev_img", type=str2bool, default=False)
+    parser.add_argument("--use_prev_txt", type=str2bool, default=True)
     parser.add_argument("--img_to_each_perceiver", type=str2bool, default=False)
 
 
