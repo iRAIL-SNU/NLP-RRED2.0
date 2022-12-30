@@ -4,14 +4,16 @@ MedViLL, pre-training model main run.py
 import os
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
 import wandb
 import argparse
 from datetime import datetime
 
-from dataset_pretrain import VLCXRDataset
+from dataset_pretrain import VLCXRDataset, VLCXRDataset_biovil
+from train_pretrain import VLCXR_Trainer, VLCXR_biovil_Trainer  # CXR-BERT
+
 from health_multimodal.image.data.transforms import create_chest_xray_transform_for_inference
 
 from torch.utils.data import DataLoader
@@ -22,7 +24,6 @@ from utils import *
 
 from helpers import get_tokenizer, get_vocab#, get_image_augmentations
 
-from train_pretrain import VLCXR_Trainer  # CXR-BERT
 
 import pandas as pd
 import pickle
@@ -35,7 +36,7 @@ from torch.utils.data import DistributedSampler
 
 
 def train(args):
-    # wandb.init(config=args, project=args.project_name)
+    run = wandb.init(config=args, project=args.project_name)
 
     set_seed(args.seed)
 
@@ -58,10 +59,12 @@ def train(args):
         knowledge_vocab = phrase_vocab + entity_vocab
 
     print("Load Train dataset", args.train_dataset)
-    train_dataset = VLCXRDataset(args.train_dataset, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations_img)
+    # train_dataset = VLCXRDataset(args.train_dataset, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations_img)
+    train_dataset = VLCXRDataset_biovil(args.train_dataset, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations_img)
 
     print("Load Test dataset", args.test_dataset)
-    test_dataset = VLCXRDataset(args.test_dataset, tokenizer, vocab, transforms, args, knowledge_vocab) \
+    # test_dataset = VLCXRDataset(args.test_dataset, tokenizer, vocab, transforms, args, knowledge_vocab) \
+    test_dataset = VLCXRDataset_biovil(args.test_dataset, tokenizer, vocab, transforms, args, knowledge_vocab) \
         if args.test_dataset is not None else None
 
     if args.device=='cuda' and torch.cuda.device_count() > 1 and args.use_ddp:
@@ -94,7 +97,8 @@ def train(args):
             if test_dataset is not None else None
 
     print("Creating BERT Trainer")
-    trainer = VLCXR_Trainer(args, train_dataloader=train_data_loader, test_dataloader=test_data_loader)
+    # trainer = VLCXR_Trainer(args, train_dataloader=train_data_loader, test_dataloader=test_data_loader, vocab=vocab, wandb_run=run)
+    trainer = VLCXR_biovil_Trainer(args, train_dataloader=train_data_loader, test_dataloader=test_data_loader, vocab=vocab, wandb_run=run)
 
     print("Training Start!")
 
@@ -107,14 +111,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     ### training args ###
-    parser.add_argument("--project_name", type=str, default='RRED2.0_pretrain_ex1')
+    parser.add_argument("--project_name", type=str, default='CXRLanguageModel_pretrain')
+    target_batch_size = 256
+    actual_batch_size = 16
+    parser.add_argument("--epochs", type=int, default=10, help='number of epochs')
+    parser.add_argument("--batch_size", type=int, default=actual_batch_size, help="number of batch size")
+    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=int(target_batch_size/actual_batch_size))  # loss, optimizer.step() slowly
 
-    parser.add_argument("--epochs", type=int, default=100, help='number of epochs')
-    parser.add_argument("--batch_size", type=int, default=1, help="number of batch size")
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)  # loss, optimizer.step() slowly
-    parser.add_argument("--warmup", type=float, default=0.1)  # optimizer = BertAdam(warmup=args.warmup)
-    parser.add_argument("--warmup_steps", type=int, default=0)
     parser.add_argument("--dropout_prob", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=123)
 
@@ -142,7 +146,7 @@ if __name__ == '__main__':
         os.mkdir(output_path)
         os.chmod(output_path, 0o777)
     parser.add_argument("--output_path", type=str, default=output_path, help="ex)path/to/save/model")
-    parser.add_argument("--log_freq", type=int, default=10, help="printing loss every n inter: setting n")
+    parser.add_argument("--log_freq", type=int, default=1, help="printing loss every n batch: setting n")
 
     parser.add_argument("--device", type=str, default='cuda')
     parser.add_argument("--use_ddp", type=str2bool, default=False)
@@ -162,7 +166,7 @@ if __name__ == '__main__':
     
     parser.add_argument("--img_aug", type=str, default="all", choices=["affine", "colur", "hflip", "all", "None"])
     parser.add_argument("--txt_aug", type=str, default="sentence_shuffling", choices=["sentence_shuffling","None"])
-    
+
     parser.add_argument("--img_hidden_sz", type=int, default=768)
     parser.add_argument("--cross_attn_every", type=int, default=3, choices=[1,2,3,4])
     parser.add_argument("--perceiver_depth", type=int, default=1, choices=[1,2,3,4])
@@ -175,7 +179,10 @@ if __name__ == '__main__':
 
 
     ### Languagemodel args ###
-    parser.add_argument("--use_MKP", type=str2bool, default=False, help='use medical vocab?')
+    parser.add_argument("--use_MKP", type=str2bool, default=True, help='use MKP?')
+    parser.add_argument("--use_SET", type=int, default=0, help='use Self-evolution Training after # steps')
+    parser.add_argument("--SET_alpha_for_onehot", type=float, default=.9, help='SET_alpha_for_onehot')
+    parser.add_argument("--add_impression_rate", type=float, default=.5)
 
     parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert'])
     parser.add_argument("--bert_model", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized",

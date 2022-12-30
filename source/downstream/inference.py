@@ -154,7 +154,8 @@ def get_args(parser):
     # "workspace/source/downstream/training_output2022-11-22/v0.3_1.00_prev_flamingo_unfreezeall/model_best.pt" ## unfreeze_all
     # "workspace/training_output/2022-11-25/v0.3_1.00_prev_all_flamingo/model_best.pt" # prev all
     # "training_output/2022-12-06/v0.3_1.00_flamingoViT/model_best.pt"
-    "training_output/2022-12-09/v0.3_1.00_prev_txt_flamingoViT/model_best.pt"
+    # "training_output/2022-12-09/v0.3_1.00_prev_txt_flamingoViT/model_best.pt"
+    "training_output/2022-12-26/v0.4_1.00_flamingoViT/model_best.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -178,7 +179,8 @@ def get_args(parser):
         # default='error_baseline_Mixed_FPR/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPI_v0.1/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPI_v0.2/frontal_test_error.jsonl',
-        default='error_baseline_Mixed_FPI_v0.3/frontal_test_error_v1_to_v10_w_prev.jsonl',
+        # default='error_baseline_Mixed_FPI_v0.3/frontal_test_error_v1_to_v10_w_prev.jsonl',
+        default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_test_error_reference_dist_v1_to_v10_w_prev.jsonl',
         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -226,7 +228,7 @@ def get_args(parser):
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
     parser.add_argument("--use_prev_img", type=str2bool, default=False)
-    parser.add_argument("--use_prev_txt", type=str2bool, default=True)
+    parser.add_argument("--use_prev_txt", type=str2bool, default=False)
     parser.add_argument("--img_to_each_perceiver", type=str2bool, default=False)
 
 

@@ -5,6 +5,7 @@ source/downstream/training_output*/
 inference_result/
 Medical_X-VL/
 training_output/20*
+pretrain_output/
 *.pth
 # Byte-compiled / optimized / DLL files
 __pycache__/

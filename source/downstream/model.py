@@ -345,13 +345,12 @@ class CXRFlamingo_with_ViT(nn.Module):
             print("Image model is freezed")
 
         self.dim = 384 if self.args.model == 'xvl-bert' else 768
-
         self.perceiver_resampler = PerceiverResampler(
-            dim=384,
+            dim=384, ##384 for vit
             depth=args.perceiver_depth,
             dim_head=args.perceiver_dim_head,
             heads=args.perceiver_num_head,
-            num_latents=args.num_img_token*2,       # the number of latents to shrink your media sequence to, perceiver style
+            num_latents=args.num_img_token *2,       # the number of latents to shrink your media sequence to, perceiver style
             num_media_embeds = args.max_num_img, ## max number of images per example
         )
 
@@ -371,13 +370,13 @@ class CXRFlamingo_with_ViT(nn.Module):
             for i in range(len(lm_layers)):
                 self.encoder_layers.append(nn.ModuleList([
                     lm_layers[i],
-                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=True) if not (i % args.cross_attn_every) else None
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None
                 ])
             )
         elif self.args.cross_attn_order == 'cross->single':
             for i in range(len(lm_layers)):
                 self.encoder_layers.append(nn.ModuleList([
-                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=True) if not (i % args.cross_attn_every) else None,
+                    GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None,
                     lm_layers[i]
                 ])
             )
@@ -445,8 +444,8 @@ class CXRFlamingo_with_ViT(nn.Module):
                 if exists(xattn_layer) and exists(img):
                     findings_embed = xattn_layer(findings_embed, img, media_locations=media_locations)
 
-        # img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
-        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img[:,0])
+        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
+        # img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img[:,0]) # Last image at Last
         img = self.img_attn_pool_norm_last(img)
 
         return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1)) #### 이거 findings_embed[:,0,:] 으로 해보자
