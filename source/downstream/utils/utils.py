@@ -117,23 +117,10 @@ def log_tanh_gating(model, args):
     for i, layer in enumerate(m.encoder_layers):
         if layer[idx_cross_attn_layer] is not None:
             p = layer[idx_cross_attn_layer].attn_gate[0].detach().cpu().item()
-            att_gate_gain[f'Layer {i} Attention tanh gain'] = np.tanh(p)
+            att_gate_gain[f'L{i} att_gate'] = abs(np.tanh(p))
 
             p = layer[idx_cross_attn_layer].ff_gate[0].detach().cpu().item()
-            ffw_gate_gain[f'Layer {i} Feedforward tanh gain'] = np.tanh(p)
-        # if layer[2] is not None:
-        #     p = layer[2].attn_gate[0].detach().cpu().item()
-        #     att_gate_gain[f'Layer {i} Attention tanh gain'] = np.tanh(p)
-
-        #     p = layer[2].ff_gate[0].detach().cpu().item()
-        #     ffw_gate_gain[f'Layer {i} Feedforward tanh gain'] = np.tanh(p)
-    # for i in range(len(m.encoder_layers)):
-    #     if not (i % args.cross_attn_every):
-    #         p = m.encoder_layers[i][0].attn_gate[0].detach().cpu().item()
-    #         att_gate_gain[f'Layer {i} Attention tanh gain'] = np.tanh(p)
-
-    #         p = m.encoder_layers[i][0].ff_gate[0].detach().cpu().item()
-    #         ffw_gate_gain[f'Layer {i} Feedforward tanh gain'] = np.tanh(p)
+            ffw_gate_gain[f'L{i} ffw_gate'] = abs(np.tanh(p))
 
     wandb.log(att_gate_gain)
     wandb.log(ffw_gate_gain)

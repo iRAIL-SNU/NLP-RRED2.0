@@ -38,7 +38,7 @@ def get_args(parser):
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--max_epochs", type=int, default=20)
 
-    parser.add_argument("--model", type=str, default="xvl-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert', 'xvl-bert'])
+    parser.add_argument("--model", type=str, default="cxr-bert", choices=['mmbt', 'bert', 'clinicalbert', 'roberta', 'gatortron', 'cxr-bert', 'xvl-bert'])
     parser.add_argument("--task_type", type=str, default="binary", choices=["multilabel", "classification", "binary"])
     parser.add_argument("--n_classes", type=int, default=2)
 
@@ -90,7 +90,8 @@ def get_args(parser):
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10_w_prev.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10_w_prev.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_train_error_reference_dist_v1_to_v10_w_prev.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_train_error_v1_to_v10.jsonl',
                         help="train dset for mimic")
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
@@ -102,7 +103,8 @@ def get_args(parser):
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10_w_prev.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10_w_prev.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_val_error_reference_dist_v1_to_v10_w_prev.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_val_error_v1_to_v10.jsonl',
                         help="valid dset for mimic")
 
