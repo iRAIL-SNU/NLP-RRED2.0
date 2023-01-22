@@ -109,6 +109,9 @@ def log_tanh_gating(model, args):
         m = model.module
     else:
         m = model
+        
+    if args.loaddir is not None:
+        m = m.encoder
     
     att_gate_gain = {}
     ffw_gate_gain = {}

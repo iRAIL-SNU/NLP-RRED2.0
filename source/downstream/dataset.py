@@ -169,7 +169,8 @@ class JsonlDatasetSNUH(Dataset):
 
             
         sentence_findings = (
-            self.text_start_token + self.tokenizer(self.image_token+str(self.data[index]["Findings"]))[: (max_seq_len_findings-1)]
+            # self.text_start_token + self.tokenizer(self.image_token+str(self.data[index]["Findings"]))[: (max_seq_len_findings-1)]
+            self.text_start_token + self.tokenizer(self.image_token+str(self.data[index]["Findings"]))[: (max_seq_len_findings-2)] + [self.sep_tok]
             )
         segment_findings = torch.zeros(len(sentence_findings))
         sentence_findings = torch.LongTensor(
@@ -182,7 +183,8 @@ class JsonlDatasetSNUH(Dataset):
         
         if self.args.use_prev_txt:
             sentence_prev_findings = (
-                [self.sep_tok] + self.tokenizer(self.image_token+str(self.data[index]["prev_Findings"]))[: (max_seq_len_prev_findings-1)]
+                # [self.sep_tok] + self.tokenizer(self.image_token+str(self.data[index]["prev_Findings"]))[: (max_seq_len_prev_findings-1)]
+                self.tokenizer(self.image_token+str(self.data[index]["prev_Findings"]))[: (max_seq_len_prev_findings-1)] + [self.sep_tok]
                 )
             segment_prev_findings = torch.ones(len(sentence_prev_findings))
             sentence_prev_findings = torch.LongTensor(

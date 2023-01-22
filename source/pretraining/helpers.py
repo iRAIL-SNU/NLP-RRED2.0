@@ -1,5 +1,6 @@
 from health_multimodal.text.model import CXRBertTokenizer, CXRBertModel
 from transformers import AutoTokenizer
+from torchvision.transforms import Compose, RandomAffine, ColorJitter, RandomHorizontalFlip, RandomResizedCrop
 
 import sys
 sys.path.append('workspace/source/downstream')
@@ -43,3 +44,22 @@ def get_vocab(args):
         assert('correct model needed')
 
     return vocab
+
+def get_image_augmentations(aug_method):
+    color_jitter = ColorJitter(brightness=.2, contrast=.2, saturation=.2, hue=.2 )
+    horizontal_flip = RandomHorizontalFlip(p=0.5)
+    random_affine = RandomAffine(degrees=30, translate=(0.1,0.1), scale=(0.8,1.2))
+    # random_resized_crop = RandomResizedCrop(size=512, scale=(0.5,1.0))
+
+    augmentations = []
+    # if aug_method in ["all","rrc"]:
+    #     augmentations.append(random_resized_crop)
+    if aug_method in ["all","colur"]:
+        augmentations.append(color_jitter)
+    if aug_method in ["all","hflip"]:
+        augmentations.append(horizontal_flip)
+    if aug_method in ["all","affine"]:
+        augmentations.append(random_affine)
+        
+   
+    return Compose(augmentations)

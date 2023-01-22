@@ -16,6 +16,7 @@ import torch.nn as nn
 
 from functools import partial
 from utils.ibot_utils import trunc_normal_
+# from ibot_utils import trunc_normal_
 from timm.models.registry import register_model
 
 

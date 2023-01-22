@@ -59,7 +59,9 @@ def get_args(parser):
     # save_name
     parser.add_argument("--save_name", type=str, default='no_name', help='file name to save combination of daset and loaddir name')
 
-    parser.add_argument("--loaddir", type=str, default='NONE')
+    # parser.add_argument("--loaddir", type=str, default='NONE')
+    # parser.add_argument("--loaddir", type=str, default='workspace/pretrain_output/VL_MLMonly') 
+    parser.add_argument("--loaddir", type=str, default='workspace/pretrain_output/MLM_only_with_CXRPRO') 
     # MKP CXR-BERT
     # parser.add_argument("--loaddir", type=str, default="/home/workspace/Multi-modality-Self-supervision/pretrain_output/2022-07-08 14:35:32.870226/49") # knowledg4_pretrained 63epoch
 
@@ -90,8 +92,8 @@ def get_args(parser):
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_train_error.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10.jsonl',
-    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10_w_prev.jsonl',
-    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_train_error_reference_dist_v1_to_v10_w_prev.jsonl',
+    parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_train_error_v1_to_v10_w_prev.jsonl',
+    # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_train_error_reference_dist_v1_to_v10_w_prev.jsonl',
     # parser.add_argument("--Train_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_train_error_v1_to_v10.jsonl',
                         help="train dset for mimic")
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_EasyProblem/frontal_val_error.jsonl',
@@ -103,8 +105,8 @@ def get_args(parser):
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.1/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.2/frontal_val_error.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10.jsonl',
-    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10_w_prev.jsonl',
-    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_val_error_reference_dist_v1_to_v10_w_prev.jsonl',
+    parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/frontal_val_error_v1_to_v10_w_prev.jsonl',
+    # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_val_error_reference_dist_v1_to_v10_w_prev.jsonl',
     # parser.add_argument("--Valid_dset1_name", type=str, default='error_baseline_Mixed_FPI_v0.3/uniform_dist/frontal_val_error_v1_to_v10.jsonl',
                         help="valid dset for mimic")
 
@@ -140,6 +142,7 @@ def get_args(parser):
                         choices=["bert-base-uncased, emilyalsentzer/Bio_ClinicalBERT", "xlm-roberta-base", '/home/workspace/Multi-modality-Self-supervision/GatorTron', 'microsoft/BiomedVLP-CXR-BERT-specialized'])
     parser.add_argument("--init_model", type=str, default="microsoft/BiomedVLP-CXR-BERT-specialized",
                         choices=["bert-base-uncased", "xlm-roberta-base", 'microsoft/BiomedVLP-CXR-BERT-specialized'])
+    parser.add_argument("--languagemodel_loaddir", type=str, default=None) #
 
     ### image args ###
     parser.add_argument("--TRANSFORM_RESIZE", type=int, default=240) ## for ViT
@@ -153,15 +156,15 @@ def get_args(parser):
     parser.add_argument("--multimodal_model_type", type=str, default="flamingo", choices=["att_pool", "vlbert", 'flamingo', 'coca'])
     parser.add_argument("--image_model_type", type=str, default="vit", choices=["vit", 'resnet'])
     parser.add_argument("--multimodal_depth", type=int, default=1, choices=[1,2,4,8,12])
-    parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
+    parser.add_argument("--cross_attn_every", type=int, default=2, choices=[1,2,3,4])
     parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])
-    parser.add_argument("--perceiver_depth", type=int, default=1, choices=[1,2,3,4,8])
+    parser.add_argument("--perceiver_depth", type=int, default=4, choices=[1,2,3,4,8])
     parser.add_argument("--perceiver_dim_head", type=int, default=64, choices=[64, 128, 256])
     parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12, 24])
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128, 256])
     parser.add_argument("--max_num_img", type=int, default=2, choices=[2])
-    parser.add_argument("--use_prev_img", type=str2bool, default=True)
-    parser.add_argument("--use_prev_txt", type=str2bool, default=True)
+    parser.add_argument("--use_prev_img", type=str2bool, default=False)
+    parser.add_argument("--use_prev_txt", type=str2bool, default=False)
     parser.add_argument("--img_to_each_perceiver", type=str2bool, default=False)
 
     parser.add_argument("--img_embed_pool_type", type=str, default="att_txt", choices=["biovil", "att_img", "att_txt"])
@@ -176,6 +179,8 @@ def get_args(parser):
     parser.add_argument("--freeze_txt", type=int, default=0)
     parser.add_argument("--freeze_img_all", type=str2bool, default=True)
     parser.add_argument("--freeze_txt_all", type=str2bool, default=True)
+    parser.add_argument("--freeze_all", type=str2bool, default=False)
+    parser.add_argument("--unfreeze_bert_and_vlLayers_only", type=str2bool, default=False)
 
     parser.add_argument("--hidden", nargs="*", type=int, default=[])
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -344,7 +349,8 @@ def model_forward(model, args, criterion, batch, compute_loss=True):
     img = img.to(device)
     prev_img = prev_img.to(device) if args.use_prev_img else None
 
-    out = model((findings, prev_findings), impression, (img, prev_img))
+    # out = model((findings, prev_findings), impression, (img, prev_img))
+    out = model(findings, (img,prev_img))
 
     tgt = tgt.to(device)
     loss = criterion(out, tgt) if compute_loss else None
@@ -378,14 +384,8 @@ def train(args):
     model.to(args.device)
     logger.info("Training..")
 
-    flag_data_parallel = False
-    if torch.cuda.device_count() > 1 and args.use_ddp==False and args.device != 'cpu':
-        print("Let's use", torch.cuda.device_count(), "GPUs!")
-        model = nn.DataParallel(model)
-        flag_data_parallel = True
-
     if os.path.exists(os.path.join(args.loaddir, "pytorch_model.bin")):
-        model.load_state_dict(torch.load(args.loaddir + "/pytorch_model.bin"), strict=True)
+        model.load_state_dict(torch.load(args.loaddir + "/pytorch_model.bin"), strict=False)
 
         print("This would load the trained model.bin, then fine-tune the model.")
     elif os.path.exists(os.path.join(args.loaddir, "model_best.pt")):
@@ -404,6 +404,12 @@ def train(args):
         print("this option initilize the model with random value. train from scratch.")
         print("Loaded model : ")
 
+    flag_data_parallel = False
+    if torch.cuda.device_count() > 1 and args.use_ddp==False and args.device != 'cpu':
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        model = nn.DataParallel(model)
+        flag_data_parallel = True
+        
     wandb.watch(model,criterion, log="all")
 
     for i_epoch in range(start_epoch, args.max_epochs):
