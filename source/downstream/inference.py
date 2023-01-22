@@ -394,7 +394,7 @@ if __name__=='__main__':
 
         if save_img:
             for i in tqdm(range(len(dataframe))):
-                image_path = make_image_path(dataframe.iloc[i], base_dir=args.data_dir_img, dataset='mimic-cxr')
+                image_path, prev_image_path = make_image_path(dataframe.iloc[i], base_dir=args.data_dir_img, dataset='mimic-cxr')
 
                 shutil.copyfile(image_path, os.path.join(output_img_path, dataframe.iloc[i]['dicom_id']+'.jpg'))
                 

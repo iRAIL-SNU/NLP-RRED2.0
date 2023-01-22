@@ -26,7 +26,8 @@ def get_model(args):
         return VLBertClf(args)
     elif args.multimodal_model_type == "flamingo":
         if args.image_model_type == 'vit':
-            return CXRFlamingo_with_ViT(args)
+            # return CXRFlamingo_with_ViT(args)
+            return CXRFlamingoForErrorDetection(args)
         elif args.image_model_type == 'resnet':
             return CXRFlamingo(args)
     elif args.multimodal_model_type == "att_pool":

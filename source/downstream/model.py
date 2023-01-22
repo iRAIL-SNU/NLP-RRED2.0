@@ -14,7 +14,7 @@ from flamingo_pytorch.flamingo_palm import *
 # from models.model_retrieval import XVLModel
 from ibot_vit import vit_small, interpolate_pos_embed
 
-
+import math
 from einops import rearrange, repeat
 
 import transformers
@@ -335,7 +335,10 @@ class CXRFlamingo_with_ViT(nn.Module):
         self.image_model, language_model = get_XVL(get_text_encoder=get_text_encoder)
         
         if self.args.model =="cxr-bert":
-           language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
+            language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
+            if self.args.languagemodel_loaddir is not None:
+                language_model.load_state_dict(torch.load(self.args.languagemodel_loaddir + "/pytorch_model.bin"), strict=True)    
+                print('using customized pre-trained language model')
                 
         if self.args.inference or self.args.freeze_txt_all:
             freeze_model_and_make_eval_(language_model)
@@ -365,7 +368,6 @@ class CXRFlamingo_with_ViT(nn.Module):
             lm_layers = language_model.bert.encoder.layer
         
         self.encoder_layers = nn.ModuleList([])
-
         if self.args.cross_attn_order == 'single->cross':
             for i in range(len(lm_layers)):
                 self.encoder_layers.append(nn.ModuleList([
@@ -386,8 +388,9 @@ class CXRFlamingo_with_ViT(nn.Module):
             nn.Linear(self.dim*2, args.n_classes, bias=False)
         )
 
-    def forward(self, findingss, impression, images):
-        findings, prev_findings = findingss
+    def forward(self, findingss, images):
+        # findings, prev_findings = findingss
+        findings = findingss
 
         txt, segment, attention_mask = findings
         findings_embed = self.text_embdding(txt, token_type_ids=segment)
@@ -456,23 +459,141 @@ class CXRFlamingo_with_ViT(nn.Module):
         unfreeze_all_layers_(self.image_model)
         print("Image model is unfreezed")
             
+
+
+class CXRFlamingoEncoder(nn.Module):
+    def __init__(self, args):
+        super(CXRFlamingoEncoder,self).__init__()
+        self.args = args
+
+        self.image_model, language_model = get_XVL(get_text_encoder=False)
+        
+        language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
+        
+        if self.args.inference or self.args.freeze_txt_all and not self.args.unfreeze_bert_and_vlLayers_only:
+            freeze_model_and_make_eval_(language_model)
+            print("Language model is freezed")
+        if self.args.inference or self.args.freeze_img_all:
+            freeze_model_and_make_eval_(self.image_model)
+            print("Image model is freezed")            
             
+        self.dim = 384 if self.args.model == 'xvl-bert' else 768
+        
+        self.perceiver_resampler = PerceiverResampler(
+            dim=384, ##384 for vit
+            depth=args.perceiver_depth,
+            dim_head=args.perceiver_dim_head,
+            heads=args.perceiver_num_head,
+            num_latents=args.num_img_token*2,       # the number of latents to shrink your media sequence to, perceiver style
+            num_media_embeds = args.max_num_img, ## max number of images per example
+        )
+
+        self.img_attn_pool_last = CrossAttention(dim=self.dim, context_dim=self.dim, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm_last = LayerNorm(self.dim)
+
+        if self.args.model == "xvl-bert":
+            self.text_embdding = language_model.embeddings
+            lm_layers = language_model.encoder.layer
+        else:
+            self.text_embdding = language_model.bert.embeddings
+            lm_layers = language_model.bert.encoder.layer
+        
+        self.encoder_layers = nn.ModuleList([])
+        for i in range(len(lm_layers)):
+            self.encoder_layers.append(nn.ModuleList([
+                lm_layers[i],
+                GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None
+            ])
+        )
+            
+        if self.args.unfreeze_bert_and_vlLayers_only:
+            freeze_model_and_make_eval_(self.image_model)
+            print("Image model is freezed")   
+            freeze_model_and_make_eval_(self.perceiver_resampler)   
+            print("perceiver resampler is freezed")       
+            
+            
+
+    def forward(self, report, images):
+        txt, segment, attention_mask = report
+
+        txt_embed = self.text_embdding(txt, token_type_ids=segment)
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+
+        media_locations = torch.zeros_like(segment).bool().to(self.args.device)
+        for i, media_location in enumerate(media_locations):
+            media_location[0] = True
+            media_location[segment[i].argmax()] = True
+
+        image, prev_image = images
+        # image = images
+        img_embed = self.image_model(image)  # Bxn_channelxWxH --> Bx2048x15x15
+        
+        # use prev image
+        if self.args.use_prev_img:
+            prev_img_embed = self.image_model(prev_image)  # Bxn_channelxWxH --> Bx2048x15x15
+
+            img_embed = rearrange(img_embed, 'b n d -> b 1 n d')
+            prev_img_embed = rearrange(prev_img_embed, 'b n d -> b 1 n d')
+                    
+            if self.args.img_to_each_perceiver:
+                prev_img_embed= self.perceiver_resampler(prev_img_embed) 
+            else:
+                img_embed = torch.cat((img_embed,prev_img_embed), dim=1)
+
+        img_embed = self.perceiver_resampler(img_embed) 
+        if self.args.img_to_each_perceiver:
+            img_embed = torch.cat((img_embed, prev_img_embed), dim=1)
+
+        img_embed = torch.reshape(img_embed, (img_embed.shape[0], img_embed.shape[1], -1, self.dim))
+
+        for lm_layer, xattn_layer in self.encoder_layers:
+            txt_embed = lm_layer(txt_embed, extended_attention_mask)[0]
+            if exists(xattn_layer) and exists(img_embed):
+                txt_embed = xattn_layer(txt_embed, img_embed, media_locations=media_locations)
+
+        return img_embed, txt_embed
+
             
 class CXRFlamingoForErrorDetection(nn.Module):
     def __init__(self,args):
         super(CXRFlamingoForErrorDetection,self).__init__()
         self.args = args
         self.encoder = CXRFlamingoEncoder(args)
+        self.dim = 384 if self.args.model == 'xvl-bert' else 768
+
+        if self.args.inference or self.args.freeze_all:
+            freeze_model_and_make_eval_(self.encoder)
+            print("Whole encoder paremeters are freezed. only task layers gonna be trained")
+
+        self.img_attn_pool_last = CrossAttention(dim=self.dim, context_dim=self.dim, dim_head=64, heads=8, norm_context=True)
+        self.img_attn_pool_norm_last = LayerNorm(self.dim)
 
         self.to_logits = nn.Sequential(
+            # LayerNorm(self.dim),
+            # nn.Linear(self.dim, args.n_classes, bias=False)
             LayerNorm(self.dim*2),
             nn.Linear(self.dim*2, args.n_classes, bias=False)
         )
+        
+    # def forward(self, report, images):
+    #     img, txt = self.encoder(report, images)
+        
+    #     # img = self.img_attn_pool_last(txt[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
+    #     # img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img[:,0]) # Last image at Last
+    #     # img = self.img_attn_pool_norm_last(img)
 
-    def forward(self, findings, impression, image):
-        img, findings_embed, impression_embed = self.encoder(findings, impression, image)
-        return self.to_logits(torch.cat((img.squeeze(1), findings_embed[:,2,:]), 1))
+    #     return self.to_logits(txt[:,0,:])
 
+    def forward(self, report, images):
+        img, txt = self.encoder(report, images)
+        
+        img = self.img_attn_pool_last(txt[:,0,:].unsqueeze(1), img.reshape(img.shape[0],-1,img.shape[-1]))
+        # img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img[:,0]) # Last image at Last
+        img = self.img_attn_pool_norm_last(img)
+
+        return self.to_logits(torch.cat((img.squeeze(1), txt[:,2,:]), 1))
 
 class CXRFlamingoForPreTraining(nn.Module):
     def __init__(self,args):
@@ -480,16 +601,13 @@ class CXRFlamingoForPreTraining(nn.Module):
         self.args = args
         self.encoder = CXRFlamingoEncoder(args)
         self.mlm = CXRFlamingoMLMHead(args, self.encoder.text_embdding.word_embeddings.weight)
-        self.itm = nn.Sequential(LayerNorm(args.hidden_sz*2), 
-                                nn.Linear(args.hidden_sz*2, 2))
 
+    def forward(self, report, images):
+        img, txt = self.encoder(report, images)
 
-    def forward(self, findings, impression, image):
-        img, findings_embed, _ = self.encoder(findings, impression, image)
-
-        prediction_scores_masked, _ = self.mlm(findings_embed[-1])
-        predict_itm = self.itm(img, findings_embed)
-        return prediction_scores_masked, predict_itm
+        prediction_scores_masked= self.mlm(txt)
+        
+        return prediction_scores_masked, img
 
 
 class CXRFlamingoPredictionHeadTransform(nn.Module):
@@ -531,79 +649,9 @@ class CXRFlamingoMLMHead(nn.Module):
         self.predictions = CXRFlamingoLMPredictionHead(
             args, bert_model_embedding_weights)
     def forward(self, sequence_output):
-        prediction_scores = self.predictions(sequence_output)
-        seq_relationship_score = None
-        return prediction_scores, seq_relationship_score
+        return self.predictions(sequence_output)
 
 
-
-class CXRFlamingoEncoder(nn.Module):
-    def __init__(self, args):
-        super(CXRFlamingoEncoder,self).__init__()
-        self.args = args
-
-        language_model = CXRBertModel.from_pretrained(args.bert_model, revision="v1.1")
-        self.image_model = get_biovil_resnet()
-        freeze_model_and_make_eval_(language_model)
-        freeze_model_and_make_eval_(self.image_model)
-
-        self.dim = args.hidden_sz # 768
-        self.img_attn_pool = CrossAttention(dim=self.dim, context_dim=args.img_hidden_sz, dim_head=64, heads=8, norm_context=True)
-        self.img_attn_pool_norm = LayerNorm(self.dim)
-        self.img_queries = nn.Parameter(torch.randn(15*15,self.dim))
-
-        self.img_attn_pool_last = CrossAttention(dim=self.dim, context_dim=self.dim, dim_head=64, heads=8, norm_context=True)
-        self.img_attn_pool_norm_last = LayerNorm(self.dim)
-
-        self.perceiver_resampler = PerceiverResampler(
-            dim=self.dim,
-            depth=args.perceiver_depth,
-            dim_head=64,
-            heads=8,
-            num_latents=64,       # the number of latents to shrink your media sequence to, perceiver style
-            num_media_embeds = 2, ## max number of images per example
-        )
-
-        self.text_embdding = language_model.bert.embeddings
-        lm_layers = language_model.bert.encoder.layer
-        
-        self.encoder_layers = nn.ModuleList([])
-        for i in range(len(lm_layers)):
-            self.encoder_layers.append(nn.ModuleList([
-                GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None,
-                lm_layers[i]
-            ])
-        )
-
-
-    def forward(self, findings, impression, image):
-        txt, _, attention_mask = findings
-
-        img = self.image_model(image).patch_embedding  
-        img = img.resize(img.shape[0],15*15,self.args.img_hidden_sz)# img: Bx15x15x2048
-
-        queries = repeat(self.img_queries, 'n d -> b n d', b=img.shape[0])
-        img = self.img_attn_pool(queries, img)
-        img = self.img_attn_pool_norm(img)
-
-        img = self.perceiver_resampler(img)
-
-        findings_embed = self.text_embdding(txt)
-        impression_embed = None
-
-        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-
-        for xattn_layer_front, lm_layer in self.encoder_layers:
-            if exists(xattn_layer_front) and exists(img):
-                findings_embed = xattn_layer_front(findings_embed, img)
-
-            findings_embed = lm_layer(findings_embed, extended_attention_mask)[0]
-
-        img = self.img_attn_pool_last(findings_embed[:,0,:].unsqueeze(1), img.squeeze(1))
-        img = self.img_attn_pool_norm_last(img)
-
-        return img, findings_embed, impression_embed
 
 
 class CXRCoCa(nn.Module):

@@ -16,9 +16,7 @@ from transformers import BertModel, BertTokenizer, AutoTokenizer
 from extract_medical_vocab import where_to_mask
 from itertools import chain
 
-import sys
-sys.path.insert(1, 'workspace/source/downstream/utils')
-from utils import shuffle_sentence
+from utils import shuffle_sentence, make_image_path
 
 def truncate_txt(txt_tokens, max_seq_len):
     while True:
@@ -583,7 +581,7 @@ class CXRDataset_DABIN(Dataset):
         return txt, label
 
 
-class VLCXRDataset(Dataset):
+class CXRDataset(Dataset):
     def __init__(self, data_path, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations=None):
         self.args = args
         self.data = [json.loads(l) for l in open(os.path.join(args.data_path,data_path))]#[:100]
@@ -592,8 +590,6 @@ class VLCXRDataset(Dataset):
 
         self.transforms = transforms
         self.augmentations = augmentations
-
-        self._tril_matrix = torch.tril(torch.ones((self.max_seq_len, self.max_seq_len), dtype=torch.long))
 
         self.tokenizer = tokenizer
         self.vocab = vocab
@@ -781,17 +777,15 @@ class VLCXRDataset(Dataset):
         return findings, impression, label
         
 
-class VLCXRDataset_biovil(Dataset):
+class CXRDataset_biovil(Dataset):
     def __init__(self, data_path, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations=None):
         self.args = args
-        self.data = [json.loads(l) for l in open(os.path.join(args.data_path,data_path))]#[:500] 
+        self.data = [json.loads(l) for l in open(os.path.join(args.data_path,data_path))]#[:100] 
 
         self.max_seq_len = args.max_seq_len  # 512
 
         self.transforms = transforms
         self.augmentations = augmentations
-
-        self._tril_matrix = torch.tril(torch.ones((self.max_seq_len, self.max_seq_len), dtype=torch.long))
 
         self.tokenizer = tokenizer
         self.vocab = vocab
@@ -804,7 +798,7 @@ class VLCXRDataset_biovil(Dataset):
         findings, impression = self.data[idx]['Findings'], self.data[idx]['Impression']
         
         findings_tensors = self.text_to_tensors(findings, num_knowledge=4)
-        impression_tensors = self.text_to_tensors(impression, num_knowledge=1)
+        impression_tensors = self.text_to_tensors(impression, num_knowledge=0)
         
         
         
@@ -966,3 +960,221 @@ class VLCXRDataset_biovil(Dataset):
         return findings, impression, label
         
         
+class VLCXRDataset(Dataset):
+    def __init__(self, data_path, tokenizer, vocab, transforms, args, knowledge_vocab, augmentations=None, is_test=False):
+        self.args = args
+        self.data = [json.loads(l) for l in open(os.path.join(args.data_path,data_path))]#[:100] 
+        self.is_test = is_test
+        self.max_seq_len = args.max_seq_len  # 512
+
+        self.transforms = transforms
+        self.augmentations = augmentations
+
+        self.tokenizer = tokenizer
+        self.vocab = vocab
+        self.knowledge_vocab = knowledge_vocab
+        
+        self.cls_tok = "<s>" if args.model == 'roberta' else "[CLS]"
+        self.sep_tok = "</s>" if args.model == 'roberta' else "[SEP]"
+        self.unk_tok = "<unk>" if args.model == 'roberta' else "[UNK]"
+        self.text_start_token = [self.cls_tok]
+        self.image_token = '<image>'
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+
+        findings_tensors = self.text_to_tensors(self.data[idx], num_knowledge=self.args.max_knowledge_mask)
+        
+        image_path, prev_image_path = make_image_path(self.data[idx], base_dir=self.args.data_dir_img, dataset='mimic-cxr')
+        image = self.get_image_with_transform(image_path)
+        if self.args.use_prev_img:
+            prev_image = self.get_image_with_transform(prev_image_path)
+            return {'findings_tensors': findings_tensors, 
+                    'image': image,
+                    'prev_image': prev_image,
+                    'chexpert_label': self.data[idx]['chexpert_label']}
+            
+        else:
+            return {'findings_tensors': findings_tensors, 
+                    'image': image,
+                    'chexpert_label': self.data[idx]['chexpert_label']}
+
+    def text_to_tensors(self, data, num_knowledge):
+        text = data['Findings']
+        prev_text = ""
+        if self.args.use_prev_txt:
+            prev_text = data['prev_Findings'] if data['prev_Findings'] is not None else ""
+        
+        if not self.is_test:
+            text = shuffle_sentence(text)
+            prev_text = shuffle_sentence(prev_text)
+            
+        text = self.cls_tok + self.image_token + text + self.sep_tok
+        prev_text = self.image_token + prev_text + self.sep_tok if prev_text != "" else ""
+            
+        tokenized_sentence = self.tokenizer(text)  # ['i','ate','an','apple'], no special token
+        tokenized_prev_sentence = self.tokenizer(prev_text)
+        tokenized_total_sentence = tokenized_sentence+tokenized_prev_sentence
+        truncate_txt(tokenized_total_sentence, self.max_seq_len)
+
+        if self.args.bert_model in ["albert-base-v2", 'xlm-roberta-base', 'xlm-roberta-large']:
+            encoded_sentence = [self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi["<unk>"]
+                                for w in tokenized_total_sentence]
+        else:
+            encoded_sentence = [self.vocab.stoi[w] if w in self.vocab.stoi else self.vocab.stoi["[UNK]"]
+                                for w in tokenized_total_sentence]  # [178, 8756, 1126, 12075]
+        
+        original_ids = encoded_sentence.copy()
+        
+        if self.args.use_MKP:
+            meaningful_idx = where_to_mask(text, self.knowledge_vocab, self.tokenizer)
+            input_ids, txt_labels = self.random_knowledge(encoded_sentence, meaningful_idx, num_knowledge=num_knowledge)
+        else:
+            input_ids, txt_labels = self.random_word(encoded_sentence)
+
+        attn_masks = [1] * len(input_ids)
+        
+        if self.args.bert_model in ["albert-base-v2", 'xlm-roberta-base', 'xlm-roberta-large']:
+            padding = [self.vocab.stoi["<pad>"] for _ in range(self.max_seq_len - len(input_ids))]
+            label_padding = [-100 for _ in range(self.max_seq_len - len(input_ids))]
+        else:
+            padding = [self.vocab.stoi["[PAD]"] for _ in range(self.max_seq_len - len(input_ids))]
+            label_padding = [-100 for _ in range(self.max_seq_len - len(input_ids))]
+        
+        input_ids.extend(padding)
+        original_ids.extend(padding)
+        attn_masks.extend(padding)
+        txt_labels.extend(label_padding)
+
+        # segment = [0 for _ in range(self.max_seq_len)]
+        segment = [0 for _ in range(len(tokenized_sentence))] + [1 for _ in range(len(tokenized_prev_sentence))] + [0 for _ in range(self.max_seq_len-len(tokenized_sentence))] 
+        truncate_txt(segment, self.max_seq_len)
+
+        input_ids_tensor = torch.tensor(input_ids)
+        original_ids_tensor = torch.tensor(original_ids)
+        txt_labels = torch.tensor(txt_labels)
+        segment = torch.tensor(segment)
+        attn_masks = torch.tensor(attn_masks)
+        
+        return (input_ids_tensor, txt_labels, attn_masks, segment, original_ids_tensor)
+            
+    def random_knowledge(self, tokens, meaningful_idx=None, num_knowledge=0.8, masking_prob=0.1):
+        if self.args.bert_model in ["albert-base-v2", 'xlm-roberta-base', 'xlm-roberta-large']:
+            mask_tok = "<mask>"
+        else:
+            mask_tok = "[MASK]"
+
+        output_label = []
+        if meaningful_idx:
+            meaningful_idx = np.array(meaningful_idx)
+            nonzeros = list(set(meaningful_idx[meaningful_idx!=0]))
+
+        if nonzeros:
+            if num_knowledge <= 1:
+                num_knowledge = round(len(nonzeros)*num_knowledge)
+            selected_knowledge_idxs = random.choices(nonzeros, k=int(num_knowledge))
+            selected_token_idxs = [list(np.where(meaningful_idx==idx)[0]) for idx in selected_knowledge_idxs]
+            borders = [[span[0]-1, span[-1]+1] for span in selected_token_idxs]
+            selected_token_idx = list(chain(*selected_token_idxs))
+            border_idx = list(chain(*borders))
+
+            for i, token in enumerate(tokens):
+                if i in selected_token_idx: #knowledge MLM
+                    tokens[i] = self.vocab.stoi[mask_tok]
+                    output_label.append(token)
+                elif i in border_idx: # knowledge 주변 단어일 경우 마스킹하지 않도록함
+                    tokens[i] = token
+                    output_label.append(-100)
+                else: # Normal MLM
+                    prob = random.random()
+                    if prob < masking_prob:
+                        prob /= masking_prob
+
+                        # 80% randomly change token to mask token
+                        if prob < 0.8:
+                            tokens[i] = self.vocab.stoi[mask_tok]
+
+                        # 10% randomly change token to random token
+                        elif prob < 0.9:
+                            tokens[i] = random.randrange(self.vocab.vocab_sz)
+
+                        output_label.append(token)
+                    else:
+                        tokens[i] = token
+                        output_label.append(-100)  # 0
+        else: # if there isn't any knowledge word, just do MLM 
+            for i, token in enumerate(tokens):
+                prob = random.random()
+                if prob < masking_prob:
+                    prob /= masking_prob
+
+                    # 80% randomly change token to mask token
+                    if prob < 0.8:
+                        tokens[i] = self.vocab.stoi[mask_tok]
+
+                    # 10% randomly change token to random token
+                    elif prob < 0.9:
+                        tokens[i] = random.randrange(self.vocab.vocab_sz)
+
+                    output_label.append(token)
+                else:
+                    tokens[i] = token
+                    output_label.append(-100)  # 0
+
+        if all(o == -100 for o in output_label):  # 0
+            # at least one mask
+            output_label[0] = tokens[0]
+            tokens[0] = self.vocab.stoi[mask_tok]
+
+        return tokens, output_label
+
+    def random_word(self, tokens):
+        output_label = []
+
+        for i, token in enumerate(tokens):
+            prob = random.random()
+            if prob < 0.15:
+                prob /= 0.15
+
+                # 80% randomly change token to mask token
+                if prob < 0.8:
+                    tokens[i] = self.vocab.stoi["[MASK]"]
+
+                # 10% randomly change token to random token
+                elif prob < 0.9:
+                    tokens[i] = random.randrange(self.vocab.vocab_sz)
+
+                output_label.append(token)
+            else:
+                tokens[i] = token
+                output_label.append(-100)  # 0
+
+        if all(o == -100 for o in output_label):  # 0
+            # at least one mask
+            output_label[0] = tokens[0]
+            tokens[0] = self.vocab.stoi["[MASK]"]
+
+        return tokens, output_label
+
+    def get_random_line(self):
+        rand_num = random.randint(0, len(self.data) - 1)
+        findings = self.data[rand_num]['Findings']
+        impression = self.data[rand_num]['impression']
+        label = self.data[rand_num]['chexpert_label']
+        return findings, impression, label
+        
+    def get_image_with_transform(self, image_path):
+        image = None
+        if image_path is not None and os.path.isfile(image_path):
+            image = Image.open(image_path)
+        else:
+            imarray = np.random.rand(2544,3056) * 255
+            image = Image.fromarray(imarray.astype('uint8'))
+            
+        if self.augmentations is not None:
+            image = self.augmentations(image)
+        image = self.transforms(image)
+        
+        return image
