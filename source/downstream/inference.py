@@ -155,7 +155,8 @@ def get_args(parser):
     # "workspace/training_output/2022-11-25/v0.3_1.00_prev_all_flamingo/model_best.pt" # prev all
     # "training_output/2022-12-06/v0.3_1.00_flamingoViT/model_best.pt"
     # "training_output/2022-12-09/v0.3_1.00_prev_txt_flamingoViT/model_best.pt"
-    "training_output/2022-12-26/v0.4_1.00_flamingoViT/model_best.pt"
+    # "training_output/2022-12-26/v0.4_1.00_flamingoViT/model_best.pt"
+    "training_output/2023-01-16/v0.3_1.00_flamingoViT_VLPretrainMLMonly/model_best.pt"
     
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/model_best.pt'
     # 'workspace/source/downstream/training_output2022-11-08/v0.3_1.00_vlbert/checkpoint.pt'
@@ -179,8 +180,8 @@ def get_args(parser):
         # default='error_baseline_Mixed_FPR/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPI_v0.1/frontal_test_error.jsonl',
         # default='error_baseline_Mixed_FPI_v0.2/frontal_test_error.jsonl',
-        # default='error_baseline_Mixed_FPI_v0.3/frontal_test_error_v1_to_v10_w_prev.jsonl',
-        default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_test_error_reference_dist_v1_to_v10_w_prev.jsonl',
+        default='error_baseline_Mixed_FPI_v0.3/frontal_test_error_v1_to_v10_w_prev.jsonl',
+        # default='error_baseline_Mixed_FPI_v0.4/reference_dist/frontal_test_error_reference_dist_v1_to_v10_w_prev.jsonl',
         help="valid dset for mimic")
 
     parser.add_argument("--dataset", type=str, default='mimic-cxr', choices=['mimic-cxr', 'indiana'],
@@ -220,9 +221,9 @@ def get_args(parser):
     parser.add_argument("--multimodal_model_type", type=str, default="flamingo", choices=["att_pool", "vlbert", 'flamingo', 'coca'])
     parser.add_argument("--image_model_type", type=str, default="vit", choices=["vit", 'resnet'])
     parser.add_argument("--multimodal_depth", type=int, default=12, choices=[1,2,4,8,12])
-    parser.add_argument("--cross_attn_every", type=int, default=1, choices=[1,2,3,4])
+    parser.add_argument("--cross_attn_every", type=int, default=2, choices=[1,2,3,4])
     parser.add_argument("--cross_attn_order", type=str, default='single->cross', choices=['cross->single', 'single->cross'])
-    parser.add_argument("--perceiver_depth", type=int, default=1, choices=[1,2,3,4])
+    parser.add_argument("--perceiver_depth", type=int, default=4, choices=[1,2,3,4])
     parser.add_argument("--perceiver_dim_head", type=int, default=64, choices=[64, 128])
     parser.add_argument("--perceiver_num_head", type=int, default=8, choices=[8, 12])
     parser.add_argument("--num_img_token", type=int, default=64, choices=[64, 128])
