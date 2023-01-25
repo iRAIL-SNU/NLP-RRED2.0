@@ -505,12 +505,13 @@ class CXRFlamingoEncoder(nn.Module):
                 GatedCrossAttentionBlock(dim=self.dim, dim_head=64, heads=12, only_attend_immediate_media=False) if not (i % args.cross_attn_every) else None
             ])
         )
-            
-        if self.args.unfreeze_bert_and_vlLayers_only:
-            freeze_model_and_make_eval_(self.image_model)
-            print("Image model is freezed")   
-            freeze_model_and_make_eval_(self.perceiver_resampler)   
-            print("perceiver resampler is freezed")       
+        
+        if not self.args.inference:
+            if self.args.unfreeze_bert_and_vlLayers_only:
+                freeze_model_and_make_eval_(self.image_model)
+                print("Image model is freezed")   
+                freeze_model_and_make_eval_(self.perceiver_resampler)   
+                print("perceiver resampler is freezed")       
             
             
 
